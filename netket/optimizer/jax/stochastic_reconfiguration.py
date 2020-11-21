@@ -1,4 +1,4 @@
-from functools import partial
+from functools import partial, singledispatch, singledispatchmethod
 from netket.stats import sum_inplace as _sum_inplace
 from netket.utils import n_nodes
 
@@ -11,8 +11,15 @@ from jax.tree_util import tree_flatten
 from netket.vmc_common import jax_shape_for_update
 from netket.utils import n_nodes, mpi4jax_available
 
+from ._sr_onthefly import delta_odagov
 
-@jit
+# TODO optionally pass vjp_fun
+def _S_grad_mul_onthefly(forward_fn, params, samples, v, n_samp):
+    # forward_fn is vectorised in samples
+    # TODO where to do the n_samp division
+    return delta_odagov(samples, params, v, forward_fn, factor=n_samp)
+
+@singledispatch
 def _S_grad_mul(oks, v, n_samp):
     r"""
     Computes y = 1/N * ( O^\dagger * O * v ) where v is a vector of
@@ -22,26 +29,32 @@ def _S_grad_mul(oks, v, n_samp):
     y = jnp.matmul(oks.conjugate().transpose(), v_tilde)
     return y
 
+# TODO avoid workaround
+# TODO where to jit
+# TODO optionally pass vjp_fun
+@_S_grad_mul.register
+def _S_grad_mul_onthefly_test(args: tuple, v, n_samp):
+    forward_fn, params, samples = args
+    return _S_grad_mul_onthefly(forward_fn, params, samples, v, n_samp)
 
-@jit
+
 def _compose_result_cmplx(v, y, diag_shift):
     return v * diag_shift + y
 
 
-@jit
+
 def _compose_result_real(v, y, diag_shift):
     return (v * diag_shift + y).real
 
 
 # Note: n_samp must be the total number of samples across all MPI processes!
 # Note: _sum_inplace can only be jitted through if we are in single process.
-@jit
+
 def _matvec_cmplx(v, oks, n_samp, diag_shift):
     y = _S_grad_mul(oks, v, n_samp)
     return _compose_result_cmplx(v, _sum_inplace(y), diag_shift)
 
 
-@jit
 def _matvec_real(v, oks, n_samp, diag_shift):
     y = _S_grad_mul(oks, v, n_samp)
     return _compose_result_real(v, _sum_inplace(y), diag_shift)
@@ -60,10 +73,24 @@ def _jax_cg_solve(
     out, _ = cg(_mat_vec, grad, x0=x0, tol=sparse_tol, maxiter=sparse_maxiter)
 
     return out
+# cant use the other one cause wee need static_argnums for forward_fn
+@partial(jit, static_argnums=(1,2))
+def _jax_cg_solve_onthefly(
+    x0, mat_vec, forward_fn, params, samples, grad, diag_shift, n_samp, sparse_tol, sparse_maxiter
+):
+    r"""
+    Solves the SR flow equation using the conjugate gradient method
+    """
+
+    _mat_vec = partial(mat_vec, oks=(forward_fn, params, samples), diag_shift=diag_shift, n_samp=n_samp)
+
+    out, _ = cg(_mat_vec, grad, x0=x0, tol=sparse_tol, maxiter=sparse_maxiter)
+
+    return out
 
 
 @jit
-def _shape_for_sr(grads, jac):
+def _shape_for_sr(grads, jac=None):
     r"""Reshapes grads and jax from tree like structures to arrays if jax_available
 
     Args:
@@ -74,17 +101,19 @@ def _shape_for_sr(grads, jac):
     """
 
     grads = jnp.concatenate(tuple(fd.reshape(-1) for fd in tree_flatten(grads)[0]))
-    jac = jnp.concatenate(
-        tuple(fd.reshape(len(fd), -1) for fd in tree_flatten(jac)[0]), -1
-    )
-
-    return grads, jac
+    if jac is None:
+        return grads
+    else:
+        jac = jnp.concatenate(
+            tuple(fd.reshape(len(fd), -1) for fd in tree_flatten(jac)[0]), -1
+        )
+        return grads, jac
 
 
 @jit
 def _flatten_grad_and_oks(grad, oks):
-    grad, oks = _shape_for_sr(grad, oks)
-    oks -= jnp.mean(oks, axis=0)
+    grad, oks = _shape_for_sr(grad, oks) # size n_parameters
+    oks -= jnp.mean(oks, axis=0) # size n_samples x n_parameters
     return grad, oks
 
 
@@ -168,7 +197,16 @@ class SR:
         else:
             self._mat_vec = _matvec_real
 
-    def compute_update(self, oks, grad, out=None):
+        # self._machine.parameters (or actyally its shape)
+        # captured here
+        # TODO move it to jax machine??
+        def forward_fn_flat(params_flat, inputs, **kwargs):
+            par = jax_shape_for_update(params_flat, self._machine.parameters)
+            return self._machine.jax_forward_nj(par, inputs, **kwargs)
+        self._forward_fn_flat = forward_fn_flat
+
+
+    def compute_update(self, oks, grad, out=None, debug=True):
         r"""
         Solves the SR flow equation for the parameter update ẋ.
 
@@ -187,7 +225,7 @@ class SR:
         if self.has_complex_parameters is None or self._machine is None:
             raise ValueError("This SR object is not properly initialized.")
 
-        grad, oks = _flatten_grad_and_oks(grad, oks)
+        grad, oks = _flatten_grad_and_oks(grad, oks)  # also subtracts the mean from ok
 
         n_samp = oks.shape[0] * n_nodes
 
@@ -198,6 +236,17 @@ class SR:
                 self._x0 = jnp.zeros(n_par, dtype=jnp.complex128)
             else:
                 self._x0 = jnp.zeros(n_par, dtype=jnp.float64)
+
+        if debug:
+            return (                self._x0,
+                                    self._mat_vec,
+                                    oks,
+                                    grad,
+                                    self._diag_shift,
+                                    n_samp,
+                                    self.sparse_tol,
+                                    self.sparse_maxiter,
+                                    )
 
         if self.has_complex_parameters:
             if self._use_iterative:
@@ -231,6 +280,96 @@ class SR:
         out = jax_shape_for_update(out, self._machine.parameters)
 
         return out
+
+    def compute_update_onthefly(self, samples, grad, out=None, debug=False):
+        r"""
+        Solves the SR flow equation for the parameter update ẋ.
+
+        The SR update is computed by solving the linear equation
+           Sẋ = f
+        where S is the covariance matrix of the partial derivatives
+        O_i(v_j) = ∂/∂x_i log Ψ(v_j) and f is a generalized force (the loss
+        gradient).
+
+        Args:
+            samples: An array of samples
+            grad: A pytree of the forces f
+            out: A pytree of the parameter updates that will be ignored
+        """
+
+        # TODO pass vjp_fun from gradient calculation
+        # which can be reused for delta_odagov
+
+        if self.has_complex_parameters is None or self._machine is None:
+            raise ValueError("This SR object is not properly initialized.")
+
+        grad_flat = _shape_for_sr(grad)  # flatten
+
+        params = self._machine.parameters
+
+        params_flat = _shape_for_sr(params)
+
+        n_samp = samples.shape[0]
+
+        n_par = params_flat.shape[0]
+
+        if self._x0 is None:
+            if self.has_complex_parameters:
+                self._x0 = jnp.zeros(n_par, dtype=jnp.complex128)
+            else:
+                self._x0 = jnp.zeros(n_par, dtype=jnp.float64)
+
+        if debug:
+            return(
+                    self._x0,
+                    self._mat_vec,
+                    self._forward_fn_flat,
+                    params_flat,
+                    samples,
+                    grad_flat,
+                    self._diag_shift,
+                    n_samp,
+                    self.sparse_tol,
+                    self.sparse_maxiter)
+
+        if self.has_complex_parameters:
+            if self._use_iterative:
+                if self._lsq_solver == "cg":
+                    out = _jax_cg_solve_onthefly(
+                        self._x0,
+                        self._mat_vec,
+                        self._forward_fn_flat,
+                        params_flat,
+                        samples,
+                        grad_flat,
+                        self._diag_shift,
+                        n_samp,
+                        self.sparse_tol,
+                        self.sparse_maxiter,
+                    )
+                self._x0 = out
+        else:
+            if self._use_iterative:
+                if self._lsq_solver == "cg":
+                    out = _jax_cg_solve_onthefly(
+                        self._x0,
+                        self._mat_vec,
+                        self._forward_fn_flat,
+                        params_flat,
+                        samples,
+                        grad_flat.real,
+                        self._diag_shift,
+                        n_samp,
+                        self.sparse_tol,
+                        self.sparse_maxiter,
+                    )
+                self._x0 = out
+
+        out = jax_shape_for_update(out, self._machine.parameters)
+
+        return out
+
+
 
     def __repr__(self):
         rep = "SR(solver="

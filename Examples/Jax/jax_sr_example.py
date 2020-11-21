@@ -8,6 +8,7 @@ import cProfile
 L = 20
 g = nk.graph.Hypercube(length=L, n_dim=1, pbc=True)
 
+
 # Hilbert space of spins on the graph
 hi = nk.hilbert.Spin(s=0.5, graph=g)
 
@@ -18,7 +19,10 @@ ma = nk.machine.JaxRbm(hi, alpha, dtype=complex)
 ma.init_random_parameters(seed=1232)
 
 # Jax Sampler
-sa = nk.sampler.MetropolisLocal(machine=ma, n_chains=2)
+# use same key so that we get the same samples
+rng_key = jax.random.PRNGKey(123)
+sa = nk.sampler.MetropolisLocal(machine=ma, n_chains=2, rng_key=rng_key)
+sa2 = nk.sampler.MetropolisLocal(machine=ma, n_chains=2, rng_key=rng_key)
 
 # Using Sgd
 op = nk.optimizer.Sgd(ma, 0.01)
@@ -32,7 +36,14 @@ gs = nk.Vmc(
     hamiltonian=ha, sampler=sa, optimizer=op, n_samples=1000, sr=sr, n_discard=0
 )
 
+gs2 = nk.Vmc(
+    hamiltonian=ha, sampler=sa2, optimizer=op, n_samples=1000, sr=sr, n_discard=0,
+    sronthefly=True
+)
+
 # The first iteration is slower because of start-up jit times
 gs.run(out="test", n_iter=2)
+gs2.run(out="test", n_iter=2)
 
 gs.run(out="test", n_iter=300)
+gs2.run(out="test", n_iter=300)
