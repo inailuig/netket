@@ -217,7 +217,7 @@ class SR:
         self._forward_fn_flat = forward_fn_flat
 
 
-    def compute_update(self, oks, grad, out=None, debug=True):
+    def compute_update(self, oks, grad, out=None):
         r"""
         Solves the SR flow equation for the parameter update ẋ.
 
@@ -247,17 +247,6 @@ class SR:
                 self._x0 = jnp.zeros(n_par, dtype=jnp.complex128)
             else:
                 self._x0 = jnp.zeros(n_par, dtype=jnp.float64)
-
-        if debug:
-            return (                self._x0,
-                                    self._mat_vec,
-                                    oks,
-                                    grad,
-                                    self._diag_shift,
-                                    n_samp,
-                                    self.sparse_tol,
-                                    self.sparse_maxiter,
-                                    )
 
         if self.has_complex_parameters:
             if self._use_iterative:
@@ -292,7 +281,7 @@ class SR:
 
         return out
 
-    def compute_update_onthefly(self, samples, grad, out=None, debug=False):
+    def compute_update_onthefly(self, samples, grad, out=None):
         r"""
         Solves the SR flow equation for the parameter update ẋ.
 
@@ -325,18 +314,6 @@ class SR:
             else:
                 self._x0 = jnp.zeros(n_par, dtype=jnp.float64)
 
-        if debug:
-            return(
-                    self._x0,
-                    self._mat_vec,
-                    self._forward_fn_flat,
-                    params_flat,
-                    samples,
-                    grad_flat,
-                    self._diag_shift,
-                    n_samp,
-                    self.sparse_tol,
-                    self.sparse_maxiter)
 
         if self.has_complex_parameters:
             if self._use_iterative:

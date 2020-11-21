@@ -121,7 +121,7 @@ class Vmc(AbstractVariationalDriver):
             else self._n_samples_node * self._batch_size // 10
         )
 
-    def _forward_and_backward(self, debug=False):
+    def _forward_and_backward(self):
         """
         Performs a number of VMC optimization steps.
 
@@ -158,7 +158,7 @@ class Vmc(AbstractVariationalDriver):
 
                 self._grads = tree_map(_sum_inplace, self._grads)
 
-                self._dp = self._sr.compute_update_onthefly(samples_r, self._grads, self._dp, debug)
+                self._dp = self._sr.compute_update_onthefly(samples_r, self._grads, self._dp)
 
             else:
                 # When using the SR (Natural gradient) we need to have the full jacobian
@@ -168,7 +168,7 @@ class Vmc(AbstractVariationalDriver):
 
                 self._grads = tree_map(_sum_inplace, self._grads)
 
-                self._dp = self._sr.compute_update(self._jac, self._grads, self._dp, debug)
+                self._dp = self._sr.compute_update(self._jac, self._grads, self._dp)
 
         else:
             # Computing updates using the simple gradient
