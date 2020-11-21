@@ -1,4 +1,4 @@
-from functools import partial, singledispatch, singledispatchmethod
+from functools import partial, singledispatch
 from netket.stats import sum_inplace as _sum_inplace
 from netket.utils import n_nodes
 
@@ -7,7 +7,9 @@ import jax.numpy as jnp
 
 from jax import jit
 from jax.scipy.sparse.linalg import cg
+from jax._src.scipy.sparse.linalg import _cg_solve
 from jax.tree_util import tree_flatten
+from jax.flatten_util import ravel_pytree
 from netket.vmc_common import jax_shape_for_update
 from netket.utils import n_nodes, mpi4jax_available
 
@@ -84,8 +86,17 @@ def _jax_cg_solve_onthefly(
 
     _mat_vec = partial(mat_vec, oks=(forward_fn, params, samples), diag_shift=diag_shift, n_samp=n_samp)
 
-    out, _ = cg(_mat_vec, grad, x0=x0, tol=sparse_tol, maxiter=sparse_maxiter)
+    # jax AD gives error with our _mat_vec
+    # (when it tries to transpose it w/ jax.linear_transpose)
+    # TODO debug it
+    # out, _ = cg(_mat_vec, grad, x0=x0, tol=sparse_tol, maxiter=sparse_maxiter)
+    # so just use the non differentiable _cg_solve for now:
 
+    # adapted from jax.scipy.sparse.linalg.cg
+    if sparse_maxiter is None:
+        sparse_maxiter = 10 * grad.size  # copied from scipy
+
+    out = _cg_solve(_mat_vec, grad, x0=x0, tol=sparse_tol, maxiter=sparse_maxiter)
     return out
 
 
@@ -197,11 +208,11 @@ class SR:
         else:
             self._mat_vec = _matvec_real
 
-        # self._machine.parameters (or actyally its shape)
         # captured here
         # TODO move it to jax machine??
+        _, unravel_pytree  = ravel_pytree(self._machine.parameters)
         def forward_fn_flat(params_flat, inputs, **kwargs):
-            par = jax_shape_for_update(params_flat, self._machine.parameters)
+            par = unravel_pytree(params_flat)
             return self._machine.jax_forward_nj(par, inputs, **kwargs)
         self._forward_fn_flat = forward_fn_flat
 
@@ -303,14 +314,9 @@ class SR:
         if self.has_complex_parameters is None or self._machine is None:
             raise ValueError("This SR object is not properly initialized.")
 
-        grad_flat = _shape_for_sr(grad)  # flatten
-
-        params = self._machine.parameters
-
-        params_flat = _shape_for_sr(params)
-
+        grad_flat, unravel_pytree  = ravel_pytree(grad)
+        params_flat, _  = ravel_pytree(self._machine.parameters)
         n_samp = samples.shape[0]
-
         n_par = params_flat.shape[0]
 
         if self._x0 is None:
@@ -365,7 +371,7 @@ class SR:
                     )
                 self._x0 = out
 
-        out = jax_shape_for_update(out, self._machine.parameters)
+        out = unravel_pytree(out)
 
         return out
 
