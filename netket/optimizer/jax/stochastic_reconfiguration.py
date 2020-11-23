@@ -7,7 +7,6 @@ import jax.numpy as jnp
 
 from jax import jit
 from jax.scipy.sparse.linalg import cg
-from jax._src.scipy.sparse.linalg import _cg_solve
 from jax.tree_util import tree_flatten
 from jax.flatten_util import ravel_pytree
 from netket.vmc_common import jax_shape_for_update
@@ -85,18 +84,7 @@ def _jax_cg_solve_onthefly(
     """
 
     _mat_vec = partial(mat_vec, oks=(forward_fn, params, samples), diag_shift=diag_shift, n_samp=n_samp)
-
-    # jax AD gives error with our _mat_vec
-    # (when it tries to transpose it w/ jax.linear_transpose)
-    # TODO debug it
-    # out, _ = cg(_mat_vec, grad, x0=x0, tol=sparse_tol, maxiter=sparse_maxiter)
-    # so just use the non differentiable _cg_solve for now:
-
-    # adapted from jax.scipy.sparse.linalg.cg
-    if sparse_maxiter is None:
-        sparse_maxiter = 10 * grad.size  # copied from scipy
-
-    out = _cg_solve(_mat_vec, grad, x0=x0, tol=sparse_tol, maxiter=sparse_maxiter)
+    out, _ = cg(_mat_vec, grad, x0=x0, tol=sparse_tol, maxiter=sparse_maxiter)
     return out
 
 

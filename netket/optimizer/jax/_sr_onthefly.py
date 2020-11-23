@@ -46,7 +46,7 @@ def delta_odagov(samples, theta, v, vlogwf, vjp_fun=None, factor=1.):
     # reuse vjp_fun from O_mean below for O_vjp
     O_mean, vjp_fun = Obar(samples, theta, vlogwf, return_vjp_fun=True, vjp_fun=vjp_fun)
     vprime = O_jvp(samples, theta, v, vlogwf)
-    vprime = vprime -O_mean @ v
+    vprime = vprime - jax.lax.broadcast(jax.lax.dot(O_mean,v),vprime.shape) 
     vprime = vprime/factor
     res = O_vjp(samples, theta, vprime.conjugate(), vlogwf, vjp_fun=vjp_fun)
     return res.conjugate()
