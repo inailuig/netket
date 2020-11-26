@@ -55,7 +55,7 @@ def odagdeltaov(samples, theta, v, vlogwf, vjp_fun=None, factor=1.):
     res = jax.tree_map(jax.lax.conj, res)  # res = res.conjugate()
     # convert back the parameters which were promoted earlier:
     # astype alone would also work, however this raises ComplexWarning when casting complex to real, so we take the real where needed first
-    res = jax.tree_multimap(lambda x, target: (x if jnp.iscomplex(target) else x.real).astype(target.dtype), res, v)
+    res = jax.tree_multimap(lambda x, target: (x if jnp.iscomplexobj(target) else x.real).astype(target.dtype), res, v)
     return res
 
 def mat_vec(v, forward_fn, params, samples, diag_shift, n_samp):
