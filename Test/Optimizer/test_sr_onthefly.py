@@ -33,7 +33,7 @@ okmean = ok.mean(axis=0)
 dok = ok - okmean
 
 def setzero_real_params(x):
-    real_ind = flatten(jax.tree_map(jax.numpy.isreal, params))
+    real_ind = flatten(jax.tree_map(jax.numpy.isrealobj, params))
     return jax.ops.index_add(x, real_ind, -1j*x[real_ind].imag)
 
 
