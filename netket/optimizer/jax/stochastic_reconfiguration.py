@@ -12,7 +12,7 @@ from jax.flatten_util import ravel_pytree
 from netket.vmc_common import jax_shape_for_update
 from netket.utils import n_nodes, mpi4jax_available
 
-from ._sr_onthefly import odagdeltaov
+from ._sr_onthefly import odagdeltaov, mat_vec as _mat_vec_onthefly
 
 
 def _S_grad_mul(oks, v, n_samp):
@@ -24,9 +24,6 @@ def _S_grad_mul(oks, v, n_samp):
     y = jnp.matmul(oks.conjugate().transpose(), v_tilde)
     return y
 
-# TODO avoid workaround
-# TODO where to jit
-# TODO optionally pass vjp_fun
 
 def _compose_result_cmplx(v, y, diag_shift):
     return v * diag_shift + y
@@ -66,20 +63,10 @@ def _jax_cg_solve(
 
 
 @partial(jit, static_argnums=(1, 9))
-def _jax_cg_solve_onthefly(x0, forward_fn, params, samples, grad, diag_shift, n_samp, sparse_tol, sparse_maxiter, has_complex_parameters):
+def _jax_cg_solve_onthefly(x0, forward_fn, params, samples, grad, diag_shift, n_samp, sparse_tol, sparse_maxiter):
     # leaves in x0 and grad are required to be arrays and need to have the same structure
     # TODO !!! MPI
-    def _mat_vec(v):
-        # all the leaves of v need to be arrays, since we need to broadcast
-        # TODO where to do the 1/n_samp ?
-        res = odagdeltaov(samples, params, v, forward_fn, factor=1./n_samp)
-        # add diagonal shift:
-        shiftv = jax.tree_map(lambda x: jax.lax.mul(x, jax.lax.broadcast(jnp.array(diag_shift, dtype=x.dtype), x.shape)), v)
-        res = jax.tree_multimap(jax.lax.add, res, shiftv)
-        if not has_complex_parameters:
-            res = jax.tree_map(jax.lax.real, res)
-        return res
-
+    _mat_vec = partial(_mat_vec_onthefly, forward_fn=forward_fn, params=params, samples=samples, diag_shift=diag_shift, n_samp=n_samp)
     out, _ = cg(_mat_vec, grad, x0=x0, tol=sparse_tol, maxiter=sparse_maxiter)
     return out
 
@@ -282,11 +269,7 @@ class SR:
         n_samp = samples.shape[0]
 
         if self._x0 is None:
-            # TODO zeros_like for pytree would be nice
-            self._x0 = jax.tree_map(partial(jax.numpy.multiply, 0), grad)  # x0 = jnp.zeros_like(grad)
-
-        if not self.has_complex_parameters:
-            grad = jax.tree_map(jax.lax.real, grad)  # grad = grad.real
+            self._x0 = jax.tree_map(jnp.zeros_like, grad)  # x0 = jnp.zeros_like(grad)
 
         if self._use_iterative:
             if self._lsq_solver == "cg":
@@ -300,7 +283,6 @@ class SR:
                     n_samp,
                     self.sparse_tol,
                     self.sparse_maxiter,
-                    self.has_complex_parameters
                 )
             self._x0 = out
 
