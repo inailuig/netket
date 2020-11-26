@@ -64,5 +64,5 @@ def mat_vec(v, forward_fn, params, samples, diag_shift, n_samp):
     res = odagdeltaov(samples, params, v, forward_fn, factor=1./n_samp)
     # add diagonal shift:
     shiftv = jax.tree_map(lambda x: jax.lax.mul(x, jax.lax.broadcast(jnp.array(diag_shift, dtype=x.dtype), x.shape)), v)
-    res = jax.tree_multimap(jax.lax.add, res, shiftv)
+    res = jax.tree_multimap(jax.lax.add, res, shiftv)  # res += diag_shift * v
     return res
