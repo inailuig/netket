@@ -48,6 +48,50 @@ def setzero_imag_part_of_real_params(x):
 
 
 
+#flatten params to a vector of real params
+
+
+def toreal(x):
+    if jnp.iscomplexobj(x):
+        return jnp.array([x.real, (-1j*x).real]) # need to use sth which jax thinks its a leaf
+    else:
+        return x
+def tree_toreal(x):
+    return jax.tree_map(toreal, x)
+# this trafo is not linear, so we cant use linear_transpose to invert it; so do it the pedestrian way:
+
+def rea(x):
+    re, im = x
+    return re +1j*im
+
+params_real = tree_toreal(params)
+params_real_flat, convreal = jax.flatten_util.ravel_pytree(params_real)
+
+def reassemble_complex(r, target):
+    # target: pytree w/ target structure (real/imag)
+    return jax.tree_multimap(lambda x, t: rea(x) if jnp.iscomplexobj(t) else x, convreal(r), target)
+
+def f_real_flat(p, samples):
+    return f(reassemble_complex(p,params) , samples)
+
+grad_real_flat = flatten(tree_toreal(grad))
+v_real_flat = flatten(tree_toreal(v))
+
+def f_real_flat_scalar(params, x):
+    return f_real_flat(params, jnp.expand_dims(x, 0))[0]
+
+@partial(jax.vmap, in_axes=(None,0))
+def grads_real(params, x):
+    r = jax.grad(lambda pars, v: f_real_flat_scalar(pars, v).real)(params_real_flat, x)
+    i = jax.grad(lambda pars, v: f_real_flat_scalar(pars, v).imag)(params_real_flat, x)
+    return rea((r,i))
+
+ok_real = grads_real(params_real_flat, samples)
+okmean_real = ok_real.mean(axis=0)
+dok_real = ok_real - okmean_real
+S_real = dok_real.conjugate().transpose() @ dok_real / n_samp
+
+
 def test_f_flat():
     a = f(params, samples)
     b = f_flat(params_flat, samples)
@@ -108,5 +152,10 @@ def test_cg():
     def mv(v):
         return setzero_imag_part_of_real_params(S @ v + diag_shift * v)
     e = setzero_imag_part_of_real_params(cg(mv, grad_flat, x0=v_flat, tol=sparse_tol, maxiter=sparse_maxiter)[0])
+    def mv_real(v):
+        #_compose_result_real also takes real here
+        return (S_real @ v + diag_shift * v).real
+    e2 = flatten(reassemble_complex(cg(mv_real, grad_real_flat, x0=v_real_flat, tol=sparse_tol, maxiter=sparse_maxiter)[0], params))
     assert jnp.allclose(a, e)
     assert jnp.allclose(b, e)
+    assert jnp.allclose(e, e2)
