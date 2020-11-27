@@ -12,7 +12,7 @@ from jax.flatten_util import ravel_pytree
 from netket.vmc_common import jax_shape_for_update
 from netket.utils import n_nodes, mpi4jax_available
 
-from ._sr_onthefly import odagdeltaov, mat_vec as _mat_vec_onthefly
+from ._sr_onthefly import mat_vec as _mat_vec_onthefly
 
 
 def _S_grad_mul(oks, v, n_samp):
