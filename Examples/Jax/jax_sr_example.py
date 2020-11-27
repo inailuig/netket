@@ -1,7 +1,6 @@
 import netket as nk
 import numpy as np
 import jax
-from jax.experimental.optimizers import sgd as JaxSgd
 import cProfile
 
 # 1D Lattice
@@ -50,5 +49,5 @@ gs.run(out="test", n_iter=2)
 gs.run(out="test", n_iter=300)
 
 print('\nonthefly')
-gs2.run(out="test", n_iter=2)
-gs2.run(out="test", n_iter=300)
+gs2.run(out="test2", n_iter=2)
+gs2.run(out="test2", n_iter=300)
