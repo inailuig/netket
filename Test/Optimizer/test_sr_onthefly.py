@@ -42,7 +42,8 @@ S = dok.conjugate().transpose() @ dok / n_samp
 
 real_ind = flatten(jax.tree_map(jax.numpy.isrealobj, params))
 def setzero_imag_part_of_real_params(x):
-    # workaround for imag not differentiable
+    # workaround for
+    # NotImplementedError: Transpose rule (for reverse-mode differentiation) for 'imag' not implemented
     return jax.ops.index_add(x, real_ind, -1j*(-1j*x[real_ind]).real)
 
 
@@ -53,6 +54,8 @@ def setzero_imag_part_of_real_params(x):
 
 def toreal(x):
     if jnp.iscomplexobj(x):
+        # workaround for
+        # NotImplementedError: Transpose rule (for reverse-mode differentiation) for 'imag' not implemented
         return jnp.array([x.real, (-1j*x).real]) # need to use sth which jax thinks its a leaf
     else:
         return x
