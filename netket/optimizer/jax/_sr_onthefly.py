@@ -21,7 +21,7 @@ def O_vjp(x, theta, v, vlogwf, return_vjp_fun=False, vjp_fun=None):
         return res
 
 
-# calculate \lvert O \rvert
+# calculate \langle O \rangle
 def Obar(samples, theta, vlogwf, **kwargs):
     # TODO better way to get dtype
     dtype = vlogwf(theta, samples[:1])[0].dtype
@@ -38,7 +38,7 @@ def odagov(samples, theta, v, vlogwf):
 
 
 # calculate O^\dagger \Delta O v
-# where \Delta O = O-\lvert O \rvert
+# where \Delta O = O-\langle O \rangle
 # optional: pass jvp_fun to be reused
 # TODO vjp_fun and jit??
 # @partial(jax.jit, static_argnums=3)
