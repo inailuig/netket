@@ -322,9 +322,9 @@ class MCState(VariationalState):
         if n_discard is None:
             n_discard = self.n_discard
 
-        self.sampler_state = self.sampler.reset(
-            self._apply_fun, self.variables, self.sampler_state
-        )
+        #self.sampler_state = self.sampler.reset(
+        #    self._apply_fun, self.variables, self.sampler_state
+        #)
 
         if self.n_discard > 0:
             _, self.sampler_state = self.sampler.sample(
@@ -480,6 +480,7 @@ class MCState(VariationalState):
         """
 
         return sr.create(
+            #apply_fun=nkjax.HashablePartial(lambda f, *args, **kwargs: jnp.exp(f, *args, **kwargs), self._apply_fun), # TODO use compose?
             apply_fun=self._apply_fun,
             params=self.parameters,
             samples=self.samples,

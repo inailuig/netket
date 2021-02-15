@@ -145,6 +145,11 @@ class MetropolisSamplerState(SamplerState):
         return text
 
 
+
+# TODO!!!
+_sq = lambda x: x.conjugate()*x
+
+
 @struct.dataclass
 class MetropolisSampler(Sampler):
     """
@@ -256,7 +261,7 @@ class MetropolisSampler(Sampler):
         with loops.Scope() as s:
             s.key = rng
             s.σ = state.σ
-            s.log_prob = sampler.machine_pow * machine(parameters, state.σ).real
+            s.prob = _sq(machine(parameters, state.σ))
 
             # for logging
             s.accepted = state.n_accepted
@@ -265,25 +270,18 @@ class MetropolisSampler(Sampler):
                 # 1 to propagate for next iteration, 1 for uniform rng and n_chains for transition kernel
                 s.key, key1, key2 = jax.random.split(s.key, 3)
 
-                σp, log_prob_correction = sampler.rule.transition(
-                    sampler, machine, parameters, state, key1, s.σ
-                )
-                proposal_log_prob = sampler.machine_pow * machine(parameters, σp).real
+                σp, _ = sampler.rule.transition( sampler, machine, parameters, state, key1, s.σ )
+                proposal_prob = _sq(machine(parameters, σp))
 
                 uniform = jax.random.uniform(key2, shape=(sampler.n_chains,))
-                if log_prob_correction is not None:
-                    do_accept = uniform < jnp.exp(
-                        proposal_log_prob - s.log_prob + log_prob_correction
-                    )
-                else:
-                    do_accept = uniform < jnp.exp(proposal_log_prob - s.log_prob)
+                do_accept = uniform < (proposal_prob/s.prob)
 
                 # do_accept must match ndim of proposal and state (which is 2)
                 s.σ = jnp.where(do_accept.reshape(-1, 1), σp, s.σ)
                 s.accepted += do_accept.sum()
 
-                s.log_prob = jax.numpy.where(
-                    do_accept.reshape(-1), proposal_log_prob, s.log_prob
+                s.prob = jax.numpy.where(
+                    do_accept.reshape(-1), proposal_prob, s.prob
                 )
 
             new_state = state.replace(

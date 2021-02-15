@@ -81,13 +81,17 @@ def tree_axpy(a, x, y):
 def O_jvp(x, params, v, forward_fn):
     # TODO apply the transpose of sum_inplace (allreduce) to v here
     # in order to get correct transposition with MPI
-    _, res = jax.jvp(lambda p: forward_fn(p, x), (params,), (v,))
+    y, res = jax.jvp(lambda p: forward_fn(p, x), (params,), (v,))
+    res = jax.lax.div(res, y)
     return res
 
 
 def O_vjp(x, params, v, forward_fn, return_vjp_fun=False, vjp_fun=None, allreduce=True):
     if vjp_fun is None:
-        _, vjp_fun = jax.vjp(forward_fn, params, x)
+        y, vjp_fun = jax.vjp(forward_fn, params, x)
+    else:
+        y = forward_fn(params,x)
+    v = jax.lax.div(v, y)
     res, _ = vjp_fun(v)
 
     if allreduce:

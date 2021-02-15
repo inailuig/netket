@@ -205,10 +205,10 @@ class AbstractVariationalDriver(abc.ABC):
 
         if out is None:
             out = tuple()
-            print(
-                "No output specified (out=[apath|nk.logging.JsonLogger(...)])."
-                "Running the optimization but not saving the output."
-            )
+            #print(
+            #    "No output specified (out=[apath|nk.logging.JsonLogger(...)])."
+            #    "Running the optimization but not saving the output."
+            #)
 
         # Log only non-root nodes
         if self._mynode == 0:

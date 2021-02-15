@@ -50,7 +50,7 @@ def to_array(hilbert, machine, params, normalize=True):
 
     if hilbert.is_indexable:
         xs = hilbert.all_states()
-        psi = machine(params, xs)
+        psi = jnp.log(machine(params, xs))
         logmax = psi.real.max()
         psi = jnp.exp(psi - logmax)
 
