@@ -88,7 +88,7 @@ class Example:
     def n_samp(self):
         return len(self.samples)
 
-    def __init__(self, n_samp, seed, outdtype, pardtype):
+    def __init__(self, n_samp, batchsize, seed, outdtype, pardtype):
 
         self.dtype = outdtype
 
@@ -107,6 +107,10 @@ class Example:
         k1, k2, k3, k4, k5 = jax.random.split(k, 5)
 
         self.samples = jax.random.normal(k1, (n_samp, 2))
+        assert n_samp % batchsize == 0
+        self.batched_samples = self.samples.reshape(
+            (-1, batchsize) + self.samples.shape[1:]
+        )
         self.w = jax.random.normal(k2, (n_samp,), self.dtype).astype(
             self.dtype
         )  # TODO remove astype once its fixed in jax
@@ -137,8 +141,8 @@ class Example:
 
 
 @pytest.fixture
-def e(n_samp, outdtype, pardtype, seed=123):
-    return Example(n_samp, seed, outdtype, pardtype)
+def e(n_samp, batchsize, outdtype, pardtype, seed=123):
+    return Example(n_samp, batchsize, seed, outdtype, pardtype)
 
 
 rt = [jnp.float32, jnp.float64]
@@ -152,6 +156,7 @@ test_types = [
 
 
 @pytest.mark.parametrize("n_samp", [0])
+@pytest.mark.parametrize("batchsize", [1])
 @pytest.mark.parametrize("outdtype, pardtype", test_types)
 def test_reassemble_complex(e):
     assert tree_allclose(
@@ -160,9 +165,10 @@ def test_reassemble_complex(e):
 
 
 @pytest.mark.parametrize("n_samp", [25])
+@pytest.mark.parametrize("batchsize", [5])
 @pytest.mark.parametrize("outdtype, pardtype", test_types)
 def test_vjp(e):
-    actual = _sr_onthefly_logic.O_vjp(e.samples, e.params, e.w, e.f)
+    actual = _sr_onthefly_logic.O_vjp(e.batched_samples, e.params, e.w, e.f)
     expected = _sr_onthefly_logic.tree_conj(
         reassemble_complex(
             (e.w @ e.ok_real).real.astype(e.params_real_flat.dtype), target=e.target
@@ -172,9 +178,10 @@ def test_vjp(e):
 
 
 @pytest.mark.parametrize("n_samp", [25])
+@pytest.mark.parametrize("batchsize", [5])
 @pytest.mark.parametrize("outdtype, pardtype", test_types)
 def test_mean(e):
-    actual = _sr_onthefly_logic.O_mean(e.samples, e.params, e.f)
+    actual = _sr_onthefly_logic.O_mean(e.batched_samples, e.params, e.f)
     expected = _sr_onthefly_logic.tree_conj(
         reassemble_complex(e.okmean_real.real, target=e.target)
     )
@@ -182,9 +189,10 @@ def test_mean(e):
 
 
 @pytest.mark.parametrize("n_samp", [25])
+@pytest.mark.parametrize("batchsize", [5])
 @pytest.mark.parametrize("outdtype, pardtype", test_types)
 def test_OH_w(e):
-    actual = _sr_onthefly_logic.OH_w(e.samples, e.params, e.w, e.f)
+    actual = _sr_onthefly_logic.OH_w(e.batched_samples, e.params, e.w, e.f)
     expected = reassemble_complex(
         (e.ok_real.conjugate().transpose() @ e.w).real.astype(e.params_real_flat.dtype),
         target=e.target,
@@ -193,17 +201,19 @@ def test_OH_w(e):
 
 
 @pytest.mark.parametrize("n_samp", [25])
+@pytest.mark.parametrize("batchsize", [5])
 @pytest.mark.parametrize("outdtype, pardtype", test_types)
 def test_jvp(e):
-    actual = _sr_onthefly_logic.O_jvp(e.samples, e.params, e.v, e.f)
+    actual = _sr_onthefly_logic.O_jvp(e.batched_samples, e.params, e.v, e.f)
     expected = e.ok_real @ e.v_real_flat
     assert tree_allclose(actual, expected)
 
 
 @pytest.mark.parametrize("n_samp", [25])
+@pytest.mark.parametrize("batchsize", [5])
 @pytest.mark.parametrize("outdtype, pardtype", test_types)
 def test_Odagger_O_v(e):
-    actual = _sr_onthefly_logic.Odagger_O_v(e.samples, e.params, e.v, e.f)
+    actual = _sr_onthefly_logic.Odagger_O_v(e.batched_samples, e.params, e.v, e.f)
     expected = reassemble_complex(
         (e.ok_real.conjugate().transpose() @ e.ok_real @ e.v_real_flat).real / e.n_samp,
         target=e.target,
@@ -212,22 +222,27 @@ def test_Odagger_O_v(e):
 
 
 @pytest.mark.parametrize("n_samp", [25])
+@pytest.mark.parametrize("batchsize", [5])
 @pytest.mark.parametrize("outdtype, pardtype", test_types)
 def test_Odagger_DeltaO_v(e):
-    actual = _sr_onthefly_logic.Odagger_DeltaO_v(e.samples, e.params, e.v, e.f)
+    actual = _sr_onthefly_logic.Odagger_DeltaO_v(e.batched_samples, e.params, e.v, e.f)
     expected = reassemble_complex(e.S_real @ e.v_real_flat, target=e.target)
     assert tree_allclose(actual, expected)
 
 
 @pytest.mark.parametrize("n_samp", [25])
+@pytest.mark.parametrize("batchsize", [5])
 @pytest.mark.parametrize("outdtype, pardtype", test_types)
 def test_DeltaOdagger_DeltaO_v(e):
-    actual = _sr_onthefly_logic.DeltaOdagger_DeltaO_v(e.samples, e.params, e.v, e.f)
+    actual = _sr_onthefly_logic.DeltaOdagger_DeltaO_v(
+        e.batched_samples, e.params, e.v, e.f
+    )
     expected = reassemble_complex(e.S_real @ e.v_real_flat, target=e.target)
     assert tree_allclose(actual, expected)
 
 
 @pytest.mark.parametrize("n_samp", [25, 1024])
+@pytest.mark.parametrize("batchsize", [1])
 @pytest.mark.parametrize("centered", [True, False])
 @pytest.mark.parametrize("jit", [True, False])
 @pytest.mark.parametrize("outdtype, pardtype", test_types)
@@ -243,7 +258,9 @@ def test_matvec(e, centered, jit):
     assert tree_allclose(actual, expected)
 
 
+@pytest.mark.xfail
 @pytest.mark.parametrize("n_samp", [25, 1024])
+@pytest.mark.parametrize("batchsize", [1])
 @pytest.mark.parametrize("centered", [True, False])
 @pytest.mark.parametrize("jit", [True, False])
 @pytest.mark.parametrize("outdtype, pardtype", test_types)
