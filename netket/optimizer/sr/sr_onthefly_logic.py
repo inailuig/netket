@@ -14,7 +14,9 @@
 
 import jax
 import jax.numpy as jnp
-from functools import partial
+from functools import partial, wraps
+from compose import compose
+
 from netket.stats import sum_inplace, subtract_mean
 from netket.utils import n_nodes
 import netket.jax as nkjax
@@ -34,18 +36,26 @@ def O_jvp(forward_fn, params, samples, v):
     return res
 
 
+# a decorator which allreduces the result tree
+def allreduce(f):
+    # allreduce w/ MPI.SUM
+    return wraps(f)(compose(partial(jax.tree_map, sum_inplace), f))
+
+
+@allreduce  # MPI
 def O_vjp(forward_fn, params, samples, w):
     _, vjp_fun = jax.vjp(forward_fn, params, samples)
     res, _ = vjp_fun(w)
-    return jax.tree_map(sum_inplace, res)  # allreduce w/ MPI.SUM
+    return res
 
 
+@allreduce  # MPI
 def O_vjp_rc(forward_fn, params, samples, w):
     _, vjp_fun = jax.vjp(forward_fn, params, samples)
     res_r, _ = vjp_fun(w)
     res_i, _ = vjp_fun(-1.0j * w)
     res = jax.tree_multimap(jax.lax.complex, res_r, res_i)
-    return jax.tree_map(sum_inplace, res)  # allreduce w/ MPI.SUM
+    return res
 
 
 def O_mean(forward_fn, params, samples, holomorphic=True):
