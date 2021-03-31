@@ -14,7 +14,9 @@
 
 import jax
 import jax.numpy as jnp
-from functools import partial
+from functools import partial, wraps
+from compose import compose
+
 from netket.stats import sum_inplace, subtract_mean
 from netket.utils import n_nodes
 
@@ -78,17 +80,24 @@ def tree_axpy(a, x, y):
     return jax.tree_multimap(lambda x_, y_: a * x_ + y_, x, y)
 
 
+# TODO apply the transpose of sum_inplace (allreduce) to the argument v
+# in order to get correct transposition with MPI
 def O_jvp(x, params, v, forward_fn):
-    # TODO apply the transpose of sum_inplace (allreduce) to v here
-    # in order to get correct transposition with MPI
     _, res = jax.jvp(lambda p: forward_fn(p, x), (params,), (v,))
     return res
 
 
+# a decorator which allreduces the result tree
+def allreduce(f):
+    # TODO move the tree_map to sum_inplace ?
+    return wraps(f)(compose(partial(jax.tree_map, sum_inplace), f))
+
+
+@allreduce
 def O_vjp(x, params, v, forward_fn):
     _, vjp_fun = jax.vjp(forward_fn, params, x)
     res, _ = vjp_fun(v)
-    return jax.tree_map(sum_inplace, res)  # allreduce w/ MPI.SUM
+    return res
 
 
 def O_mean(samples, params, forward_fn):
