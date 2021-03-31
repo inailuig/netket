@@ -80,8 +80,60 @@ def tree_axpy(a, x, y):
     return jax.tree_multimap(lambda x_, y_: a * x_ + y_, x, y)
 
 
+# TODO check that the 1 is actually optimized away by jit
+tree_xpy = partial(tree_axpy, 1)
+
+
+def unbatch(x):
+    return x.reshape((-1,) + x.shape[2:])
+
+
+def batch(x, batchsize=None):
+    # batchsize=None -> add just a dummy batch dimension, same as np.expand_dims(x, 0)
+    n = x.shape[0]
+    if batchsize is None:
+        batchsize = n
+    else:
+        assert (n % batchsize) == 0
+    return x.reshape((n // batchsize, batchsize) + x.shape[1:])
+
+
+def scan_accum(f, x, op):
+    res0 = f(jax.tree_map(lambda x: x[0], x))
+
+    def f_(carry, x):
+        return op(carry, f(x)), None
+
+    res, _ = jax.lax.scan(
+        f_, res0, jax.tree_map(lambda x: x[1:], x), unroll=1
+    )  # make sure it uses the loop impl
+    return res
+
+
+def scan_append(f, x):
+    def f_(carry, x):
+        return None, f(x)
+
+    _, res = jax.lax.scan(f_, None, x, unroll=1)  # make sure it uses the loop impl
+    return res
+
+
+# TODO add in_axes a la vmap to avoid the w workaround below
+def scanmap(f, scan_fun, **kwargs):
+    @wraps(f)
+    def f_(x, *fargs, **fkwargs):
+        return scan_fun(lambda x_: f(x_, *fargs, **fkwargs), x, **kwargs)
+
+    return f_
+
+
 # TODO apply the transpose of sum_inplace (allreduce) to the argument v
 # in order to get correct transposition with MPI
+# @partial(compose, unbatch)
+@partial(
+    lambda f: wraps(f)(compose(unbatch, f))
+)  # w workaround part 1: flatten the batched w
+@partial(scanmap, scan_fun=scan_append)
 def O_jvp(x, params, v, forward_fn):
     _, res = jax.jvp(lambda p: forward_fn(p, x), (params,), (v,))
     return res
@@ -93,11 +145,41 @@ def allreduce(f):
     return wraps(f)(compose(partial(jax.tree_map, sum_inplace), f))
 
 
-@allreduce
-def O_vjp(x, params, v, forward_fn):
+def w_workaround_3(f):
+    def _f(x, params, w, forward_fn):
+        w = batch(w, x.shape[1])
+        xw = (x, w)
+        return f(xw, params, forward_fn)
+
+    return _f
+
+
+def w_workaround_2(f):
+    def _f(xw, params, forward_fn):
+        x, w = xw
+        return f(x, params, w, forward_fn)
+
+    return _f
+
+
+def _O_vjp(x, params, w, forward_fn):
     _, vjp_fun = jax.vjp(forward_fn, params, x)
-    res, _ = vjp_fun(v)
+    res, _ = vjp_fun(w)
     return res
+
+
+@allreduce
+@w_workaround_3  # put x and w in a single arg and batch w
+@partial(scanmap, scan_fun=scan_accum, op=tree_xpy)
+@w_workaround_2  # split xw arg into x and w
+def O_vjp(*args, **kwargs):
+    return _O_vjp(*args, **kwargs)
+
+
+@allreduce
+@partial(scanmap, scan_fun=scan_accum, op=tree_xpy)
+def O_vjp2(*args, **kwargs):
+    return _O_vjp(*args, **kwargs)
 
 
 def O_mean(samples, params, forward_fn):
@@ -107,9 +189,12 @@ def O_mean(samples, params, forward_fn):
     """
 
     # determine the output type of the forward pass
-    dtype = jax.eval_shape(forward_fn, params, samples).dtype
-    v = jnp.ones(samples.shape[0], dtype=dtype) * (1.0 / (samples.shape[0] * n_nodes))
-    return O_vjp(samples, params, v, forward_fn)
+    dtype = jax.eval_shape(forward_fn, params, samples[0]).dtype
+    # same v for every batch
+    v = jnp.ones(samples.shape[1], dtype=dtype) * (
+        1.0 / (samples.shape[0] * samples.shape[1] * n_nodes)
+    )
+    return O_vjp2(samples, params, v, forward_fn)
 
 
 def OH_w(samples, params, w, forward_fn):
@@ -125,7 +210,6 @@ def OH_w(samples, params, w, forward_fn):
     # TODO The allreduce in O_vjp could be deferred until after the tree_cast
     # where the amount of data to be transferred would potentially be smaller
     res = tree_conj(O_vjp(samples, params, w.conjugate(), forward_fn))
-
     return tree_cast(res, params)
 
 
@@ -142,7 +226,7 @@ def Odagger_O_v(samples, params, v, forward_fn, *, center=False):
     # w is an array of size n_samples; each MPI rank has its own slice
     w = O_jvp(samples, params, v, forward_fn)
     # w /= n_samples (elementwise):
-    w = w * (1.0 / (samples.shape[0] * n_nodes))
+    w = w * (1.0 / (samples.shape[0] * samples.shape[1] * n_nodes))
 
     if center:
         w = subtract_mean(w)  # w/ MPI
@@ -169,8 +253,7 @@ def DeltaOdagger_DeltaO_v(samples, params, v, forward_fn):
     return Odagger_O_v(samples, params, v, forward_fn_centered)
 
 
-# TODO block the computations (in the same way as done with MPI) if memory consumtion becomes an issue
-def mat_vec(v, forward_fn, params, samples, diag_shift, centered=True):
+def mat_vec_batched(v, forward_fn, params, samples, diag_shift, centered=True):
     r"""
     compute (S + diag_shift) v
 
@@ -186,7 +269,7 @@ def mat_vec(v, forward_fn, params, samples, diag_shift, centered=True):
     v: a pytree with the same structure as params
     forward_fn(params, x): a vectorised function returning the logarithm of the wavefunction for each configuration in x
     params: pytree of parameters with arrays as leaves
-    samples: an array of samples (when using MPI each rank has its own slice of samples)
+    samples: an array of batched samples (when using MPI each rank has its own slice of batched samples)
     diag_shift: a scalar diagonal shift
     """
 
@@ -198,3 +281,10 @@ def mat_vec(v, forward_fn, params, samples, diag_shift, centered=True):
     # add diagonal shift:
     res = tree_axpy(diag_shift, v, res)  # res += diag_shift * v
     return res
+
+
+# TODO remove once its no longer needed used anywhere
+def mat_vec(v, forward_fn, params, samples, diag_shift, centered=True):
+    return mat_vec_batched(
+        v, forward_fn, params, jnp.expand_dims(samples, 0), diag_shift, centered=True
+    )
