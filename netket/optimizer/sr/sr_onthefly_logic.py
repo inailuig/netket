@@ -14,9 +14,14 @@
 
 import jax
 import jax.numpy as jnp
+
+import numpy as np
+
 from functools import partial
+
 from netket.stats import sum_inplace, subtract_mean
 from netket.utils import n_nodes
+
 
 # Stochastic Reconfiguration with jvp and vjp
 
@@ -85,9 +90,9 @@ def O_jvp(x, params, v, forward_fn):
     return res
 
 
-def O_vjp(x, params, v, forward_fn):
+def O_vjp(x, params, w, forward_fn):
     _, vjp_fun = jax.vjp(forward_fn, params, x)
-    res, _ = vjp_fun(v)
+    res, _ = vjp_fun(w)
     return jax.tree_map(sum_inplace, res)  # allreduce w/ MPI.SUM
 
 
@@ -99,8 +104,8 @@ def O_mean(samples, params, forward_fn):
 
     # determine the output type of the forward pass
     dtype = jax.eval_shape(forward_fn, params, samples).dtype
-    v = jnp.ones(samples.shape[0], dtype=dtype) * (1.0 / (samples.shape[0] * n_nodes))
-    return O_vjp(samples, params, v, forward_fn)
+    w = np.array([1.0 / (samples.shape[0] * n_nodes)], dtype=dtype)
+    return O_vjp(samples, params, w, forward_fn)
 
 
 def OH_w(samples, params, w, forward_fn):
