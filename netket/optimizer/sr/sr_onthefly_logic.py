@@ -40,15 +40,7 @@ def O_vjp(forward_fn, params, samples, w):
     return jax.tree_map(sum_inplace, res)  # allreduce w/ MPI.SUM
 
 
-def O_vjp_rc(forward_fn, params, samples, w):
-    _, vjp_fun = jax.vjp(forward_fn, params, samples)
-    res_r, _ = vjp_fun(w)
-    res_i, _ = vjp_fun(-1.0j * w)
-    res = jax.tree_multimap(jax.lax.complex, res_r, res_i)
-    return jax.tree_map(sum_inplace, res)  # allreduce w/ MPI.SUM
-
-
-def O_mean(forward_fn, params, samples, holomorphic=True):
+def O_mean(forward_fn, params, samples):
     r"""
     compute \langle O \rangle
     i.e. the mean of the rows of the jacobian of forward_fn
@@ -58,22 +50,17 @@ def O_mean(forward_fn, params, samples, holomorphic=True):
     dtype = jax.eval_shape(forward_fn, params, samples).dtype
     w = jnp.ones(samples.shape[0], dtype=dtype) * (1.0 / (samples.shape[0] * n_nodes))
 
-    homogeneous = nkjax.tree_ishomogeneous(params)
-    real_params = not nkjax.tree_leaf_iscomplex(params)
-    real_out = not nkjax.is_complex(jax.eval_shape(forward_fn, params, samples))
+    if (not nkjax.tree_leaf_iscomplex(params)) and nkjax.is_complex_dtype(dtype):
+        # R->C
+        # promote params to complex
+        _params = params
+        params = jax.tree_map(lambda x: x.astype(nkjax.dtype_complex(x)), _params)
+        # _forward_fn = forward_fn
+        # def forward_fn(p, x):
+        #    return _forward_fn(tree_cast(p, _params), x)
+        w = w.astype(jax.eval_shape(forward_fn, params, samples).dtype)
 
-    if homogeneous and (real_params or holomorphic):
-        if real_params and not real_out:
-            # R->C
-            return O_vjp_rc(forward_fn, params, samples, w)
-        else:
-            # R->R and holomorphic C->C
-            return O_vjp(forward_fn, params, samples, w)
-    else:
-        # R&C -> C
-        # non-holomorphic
-        # C->R
-        assert False
+    return O_vjp(forward_fn, params, samples, w)
 
 
 def OH_w(forward_fn, params, samples, w):
@@ -132,13 +119,13 @@ def DeltaOdagger_DeltaO_v(forward_fn, params, samples, v, holomorphic=True):
     if not (homogeneous and (real_params or holomorphic)):
         # everything except R->R, holomorphic C->C and R->C
         params, reassemble = nkjax.tree_to_real(params)
-        v, _ = nkjax.tree_to_real(v)
+        v
         _forward_fn = forward_fn
 
         def forward_fn(p, x):
             return _forward_fn(reassemble(p), x)
 
-    omean = O_mean(forward_fn, params, samples, holomorphic=holomorphic)
+    omean = O_mean(forward_fn, params, samples)
 
     def forward_fn_centered(p, x):
         return forward_fn(p, x) - tree_dot(p, omean)
