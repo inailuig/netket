@@ -22,13 +22,27 @@ from netket.utils import n_nodes
 import netket.jax as nkjax
 from netket.jax import tree_conj, tree_dot, tree_cast, tree_axpy
 
+from .scanmap import *
+from .batch_utils import *
+
 # Stochastic Reconfiguration with jvp and vjp
 
 # Here O (Oks) is the jacobian (derivatives w.r.t. params) of the vectorised (in x) log wavefunction (forward_fn) evaluated at all samples.
 # instead of computing (and storing) the full jacobian matrix jvp and vjp are used to implement the matrix vector multiplications with it.
 # Expectation values are then just the mean over the leading dimension.
 
+# TODO maybe it would help to also batch jvp to reduce compile times?
+# @w_workaround_1
+# @partial(scanmap, scan_fun=scan_append)
+#
+def workaround(g):
+    def f_(f, p, s, v):
+        return g(f, p, unbatch(s), v)
 
+    return f_
+
+
+@workaround  # unbatch samples
 def O_jvp(forward_fn, params, samples, v):
     # TODO apply the transpose of sum_inplace (allreduce) to v here
     # in order to get correct transposition with MPI
@@ -42,14 +56,29 @@ def allreduce(f):
     return wraps(f)(compose(partial(jax.tree_map, sum_inplace), f))
 
 
-@allreduce  # MPI
-def O_vjp(forward_fn, params, samples, w):
+def _O_vjp(forward_fn, params, samples, w):
     _, vjp_fun = jax.vjp(forward_fn, params, samples)
     res, _ = vjp_fun(w)
     return res
 
 
 @allreduce  # MPI
+@w_workaround_4  # batch w
+@w_workaround_3  # put x and w in a single arg
+@partial(scanmap, scan_fun=partial(scan_accum, op=tree_xpy), argnum=2)
+@w_workaround_2  # split xw arg into x and w
+def O_vjp(*args, **kwargs):
+    return _O_vjp(*args, **kwargs)
+
+
+@allreduce  # MPI
+@partial(scanmap, scan_fun=partial(scan_accum, op=tree_xpy), argnum=2)
+def O_vjp2(*args, **kwargs):
+    return _O_vjp(*args, **kwargs)
+
+
+@allreduce  # MPI
+@partial(scanmap, scan_fun=partial(scan_accum, op=tree_xpy), argnum=2)
 def O_vjp_rc(forward_fn, params, samples, w):
     _, vjp_fun = jax.vjp(forward_fn, params, samples)
     res_r, _ = vjp_fun(w)
@@ -66,7 +95,9 @@ def O_mean(forward_fn, params, samples, holomorphic=True):
 
     # determine the output type of the forward pass
     dtype = jax.eval_shape(forward_fn, params, samples).dtype
-    w = jnp.ones(samples.shape[0], dtype=dtype) * (1.0 / (samples.shape[0] * n_nodes))
+    w = jnp.ones(samples.shape[1], dtype=dtype) * (
+        1.0 / (samples.shape[0] * samples.shape[1] * n_nodes)
+    )
 
     homogeneous = nkjax.tree_ishomogeneous(params)
     real_params = not nkjax.tree_leaf_iscomplex(params)
@@ -78,7 +109,7 @@ def O_mean(forward_fn, params, samples, holomorphic=True):
             return O_vjp_rc(forward_fn, params, samples, w)
         else:
             # R->R and holomorphic C->C
-            return O_vjp(forward_fn, params, samples, w)
+            return O_vjp2(forward_fn, params, samples, w)
     else:
         # R&C -> C
         # non-holomorphic
@@ -116,7 +147,7 @@ def Odagger_O_v(forward_fn, params, samples, v, *, center=False):
     # w is an array of size n_samples; each MPI rank has its own slice
     w = O_jvp(forward_fn, params, samples, v)
     # w /= n_samples (elementwise):
-    w = w * (1.0 / (samples.shape[0] * n_nodes))
+    w = w * (1.0 / (samples.shape[0] * samples.shape[1] * n_nodes))
 
     if center:
         w = subtract_mean(w)  # w/ MPI
@@ -160,8 +191,7 @@ def DeltaOdagger_DeltaO_v(forward_fn, params, samples, v, holomorphic=True):
     return res
 
 
-# TODO block the computations (in the same way as done with MPI) if memory consumtion becomes an issue
-def mat_vec(
+def mat_vec_batched(
     v, forward_fn, params, samples, diag_shift, centered=True, holomorphic=True
 ):
     r"""
@@ -192,3 +222,20 @@ def mat_vec(
     # add diagonal shift:
     res = tree_axpy(diag_shift, v, res)  # res += diag_shift * v
     return res
+
+
+@wraps(mat_vec_batched)
+def mat_vec(
+    v,
+    forward_fn,
+    params,
+    samples,
+    diag_shift,
+    centered=True,
+    holomorphic=True,
+    batchsize=None,
+):
+    samples = batch(samples, batchsize)
+    return mat_vec_batched(
+        v, forward_fn, params, samples, diag_shift, centered, holomorphic
+    )
