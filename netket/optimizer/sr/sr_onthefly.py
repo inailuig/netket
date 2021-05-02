@@ -24,7 +24,7 @@ from netket.utils.types import PyTree, Array
 from netket.utils import rename_class
 import netket.jax as nkjax
 
-from .sr_onthefly_logic import mat_vec as mat_vec_onthefly, tree_cast
+from .sr_onthefly_logic import mat_vec_batched as mat_vec_onthefly_batched, tree_cast
 
 from .base import SR
 
@@ -215,11 +215,12 @@ def apply_onthefly(S: LazySMatrix, grad: PyTree, x0: Optional[PyTree]) -> PyTree
         x0 = jax.tree_map(jnp.zeros_like, grad)
 
     samples = S.samples
-    if jnp.ndim(samples) != 2:
-        samples = samples.reshape((-1, samples.shape[-1]))
+    # if jnp.ndim(samples) != 2:
+    #    samples = samples.reshape((-1, samples.shape[-1]))
+    # TODO the batchsize from the sampling is probably too small
 
     _mat_vec = partial(
-        mat_vec_onthefly,
+        mat_vec_onthefly_batched,
         forward_fn=fun,
         params=S.params,
         samples=samples,
@@ -262,13 +263,14 @@ def lazysmatrix_mat_treevec(
         ravel_result = False
 
     samples = S.samples
-    if jnp.ndim(samples) != 2:
-        samples = samples.reshape((-1, samples.shape[-1]))
+    # if jnp.ndim(samples) != 2:
+    #    samples = samples.reshape((-1, samples.shape[-1]))
+    # TODO the batchsize from the sampling is probably too small
 
     vec = tree_cast(vec, S.params)
 
     mat_vec = partial(
-        mat_vec_onthefly,
+        mat_vec_onthefly_batched,
         forward_fn=fun,
         params=S.params,
         samples=samples,
