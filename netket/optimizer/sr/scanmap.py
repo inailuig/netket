@@ -1,5 +1,9 @@
 import jax
 import jax.numpy as jnp
+
+from jax import linear_util as lu
+from jax.api_util import argnums_partial
+
 from functools import partial, wraps
 from compose import compose
 
@@ -32,47 +36,12 @@ def scan_append(f, x):
     return res
 
 
-# TODO add multiple in_axes a la vmap to avoid the w workaround below
-
-
-def scanmap(f, scan_fun, argnum=0):
-    @wraps(f)
-    def f_(*fargs, **fkwargs):
-        x = fargs[argnum]
-        return scan_fun(
-            lambda x_: f(*fargs[:argnum], x_, *fargs[argnum + 1 :], **fkwargs), x
-        )
+# TODO in_axes a la vmap?
+def scanmap(fun, scan_fun, argnums=0):
+    # @wraps(f)
+    def f_(*args, **kwargs):
+        f = lu.wrap_init(fun, kwargs)
+        f_partial, dyn_args = argnums_partial(f, argnums, args)
+        return scan_fun(lambda x: f_partial.call_wrapped(*x), dyn_args)
 
     return f_
-
-
-# w workaround part 1: flatten the batched w
-def w_workaround_1(f):
-    return wraps(f)(compose(unbatch, f))
-
-
-# split xw arg into x and w
-def w_workaround_2(f):
-    def _f(forward_fn, params, xw):
-        x, w = xw
-        return f(forward_fn, params, x, w)
-
-    return _f
-
-
-# put x and w in a single arg
-def w_workaround_3(f):
-    def _f(forward_fn, params, x, w):
-        xw = (x, w)
-        return f(forward_fn, params, xw)
-
-    return _f
-
-
-# batch w
-def w_workaround_4(f):
-    def _f(forward_fn, params, x, w):
-        w = batch(w, x.shape[1])
-        return f(forward_fn, params, x, w)
-
-    return _f

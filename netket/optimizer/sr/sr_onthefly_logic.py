@@ -35,14 +35,9 @@ from .batch_utils import *
 # @w_workaround_1
 # @partial(scanmap, scan_fun=scan_append)
 #
-def workaround(g):
-    def f_(f, p, s, v):
-        return g(f, p, unbatch(s), v)
-
-    return f_
 
 
-@workaround  # unbatch samples
+@partial(unbatch_args, argnums=2)  # unbatch samples
 def O_jvp(forward_fn, params, samples, v):
     # TODO apply the transpose of sum_inplace (allreduce) to v here
     # in order to get correct transposition with MPI
@@ -63,22 +58,20 @@ def _O_vjp(forward_fn, params, samples, w):
 
 
 @allreduce  # MPI
-@w_workaround_4  # batch w
-@w_workaround_3  # put x and w in a single arg
-@partial(scanmap, scan_fun=partial(scan_accum, op=tree_xpy), argnum=2)
-@w_workaround_2  # split xw arg into x and w
+@partial(batch_args, argnums=3, src=2)  # batch w with batchsize from samples
+@partial(scanmap, scan_fun=partial(scan_accum, op=tree_xpy), argnums=(2, 3))
 def O_vjp(*args, **kwargs):
     return _O_vjp(*args, **kwargs)
 
 
 @allreduce  # MPI
-@partial(scanmap, scan_fun=partial(scan_accum, op=tree_xpy), argnum=2)
-def O_vjp2(*args, **kwargs):
+@partial(scanmap, scan_fun=partial(scan_accum, op=tree_xpy), argnums=2)
+def O_vjp_rr_cc(*args, **kwargs):
     return _O_vjp(*args, **kwargs)
 
 
 @allreduce  # MPI
-@partial(scanmap, scan_fun=partial(scan_accum, op=tree_xpy), argnum=2)
+@partial(scanmap, scan_fun=partial(scan_accum, op=tree_xpy), argnums=2)
 def O_vjp_rc(forward_fn, params, samples, w):
     _, vjp_fun = jax.vjp(forward_fn, params, samples)
     res_r, _ = vjp_fun(w)
@@ -109,7 +102,7 @@ def O_mean(forward_fn, params, samples, holomorphic=True):
             return O_vjp_rc(forward_fn, params, samples, w)
         else:
             # R->R and holomorphic C->C
-            return O_vjp2(forward_fn, params, samples, w)
+            return O_vjp_rr_cc(forward_fn, params, samples, w)
     else:
         # R&C -> C
         # non-holomorphic
