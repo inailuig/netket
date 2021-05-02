@@ -31,15 +31,11 @@ from .batch_utils import *
 # instead of computing (and storing) the full jacobian matrix jvp and vjp are used to implement the matrix vector multiplications with it.
 # Expectation values are then just the mean over the leading dimension.
 
-# TODO maybe it would help to also batch jvp to reduce compile times?
-# @w_workaround_1
-# @partial(scanmap, scan_fun=scan_append)
-#
 
-
-@partial(unbatch_args, argnums=2)  # unbatch samples
+@unbatch_output
+@partial(scanmap, scan_fun=scan_append, argnums=2)
 def O_jvp(forward_fn, params, samples, v):
-    # TODO apply the transpose of sum_inplace (allreduce) to v here
+    # TODO apply the transpose of sum_inplace (allreduce) to the arg v here
     # in order to get correct transposition with MPI
     _, res = jax.jvp(lambda p: forward_fn(p, samples), (params,), (v,))
     return res
