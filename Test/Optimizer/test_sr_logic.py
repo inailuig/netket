@@ -267,16 +267,18 @@ def test_DeltaOdagger_DeltaO_v(e, holomorphic):
 
 
 @pytest.mark.parametrize("holomorphic", [True, False])
-@pytest.mark.parametrize("n_samp", [25, 1024])
+@pytest.mark.parametrize("n_samp, batchsize", [(25, None), (25, 5), (1024, 128)])
 @pytest.mark.parametrize("centered", [True, False])
 @pytest.mark.parametrize("jit", [True, False])
 @pytest.mark.parametrize("outdtype, pardtype", test_types)
-def test_matvec(e, centered, jit, holomorphic):
+def test_matvec(e, centered, jit, holomorphic, batchsize):
     diag_shift = 0.01
     mv = sr_onthefly_logic.mat_vec
     if jit:
-        mv = jax.jit(mv, static_argnums=(1, 5, 6))
-    actual = mv(e.v, e.f, e.params, e.samples, diag_shift, centered, holomorphic)
+        mv = jax.jit(mv, static_argnums=(1, 5, 6, 7))
+    actual = mv(
+        e.v, e.f, e.params, e.samples, diag_shift, centered, holomorphic, batchsize
+    )
     expected = reassemble_complex(
         e.S_real @ e.v_real_flat + diag_shift * e.v_real_flat, target=e.target
     )
