@@ -286,23 +286,23 @@ def test_matvec(e, centered, jit, holomorphic, batchsize):
 
 
 @pytest.mark.parametrize("holomorphic", [True, False])
-@pytest.mark.parametrize("n_samp", [25, 1024])
+@pytest.mark.parametrize("n_samp, batchsize", [(25, None), (25, 5), (1024, 128)])
 @pytest.mark.parametrize("centered", [True, False])
 @pytest.mark.parametrize("jit", [True, False])
 @pytest.mark.parametrize("outdtype, pardtype", test_types)
-def test_matvec_linear_transpose(e, centered, jit):
-    def mvt(v, f, params, samples, centered, w):
-        (res,) = jax.linear_transpose(
-            lambda v_: sr_onthefly_logic.mat_vec(v_, f, params, samples, 0.0, centered),
-            v,
-        )(w)
+def test_matvec_linear_transpose(e, centered, jit, holomorphic, batchsize):
+    def mvt(v, params, samples, w):
+        mv = lambda v_: sr_onthefly_logic.mat_vec(
+            v_, e.f, params, samples, 0.0, centered, holomorphic, batchsize
+        )
+        (res,) = jax.linear_transpose(mv, v)(w)
         return res
 
     if jit:
-        mvt = jax.jit(mvt, static_argnums=(1, 4))
+        mvt = jax.jit(mvt)
 
     w = e.v
-    actual = mvt(e.v, e.f, e.params, e.samples, centered, w)
+    actual = mvt(e.v, e.params, e.samples, w)
 
     # use that S is hermitian:
     # S^T = (O^H O)^T = O^T O* = (O^H O)* = S*
