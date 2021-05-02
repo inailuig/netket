@@ -1,3 +1,6 @@
+from compose import compose
+
+
 def unbatch(x):
     return x.reshape((-1,) + x.shape[2:])
 
