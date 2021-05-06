@@ -30,6 +30,11 @@ import netket.jax as nkjax
 from netket.jax import tree_cast, tree_conj, tree_axpy, tree_to_real
 
 
+def unbatch_fn(f):
+    def _f(W, σ):
+        return f(W, σ[jnp.newaxis, :])[0]
+
+
 def sub_mean(oks: PyTree) -> PyTree:
     return jax.tree_map(partial(subtract_mean, axis=0), oks)  # MPI
 
@@ -71,7 +76,8 @@ def vmap_grad_cplx(forward_fn: Callable, params: PyTree, samples: Array) -> PyTr
 
     Returns:
         The Jacobian matrix ∂/∂pₖ ln Ψ(σⱼ) as a PyTree"""
-    y, vjp_fun = jax.vjp(forward_fn, params, samples)
+    f = unbatch_fn(forward_fn)
+    y, vjp_fun = jax.vjp(f, params, samples)
     gr, _ = vjp_fun(np.array(1.0, dtype=jnp.result_type(y)))
     gi, _ = vjp_fun(np.array(-1.0j, dtype=jnp.result_type(y)))
     return gr, gi
@@ -81,7 +87,8 @@ def vmap_grad_centered_cplx(
     forward_fn: Callable, params: PyTree, samples: Array
 ) -> PyTree:
     """Calculates centred Jacobian (i.e., subtracts MPI mean from vmap_grad)"""
-    gr, gi = vmap_grad_rc(forward_fn, params, samples)
+    f = unbatch_fn(forward_fn)
+    gr, gi = vmap_grad_rc(f, params, samples)
     # Return the real and imaginary parts of ΔOⱼₖ stacked along the sample axis
     # Re[S] = Re[(ΔOᵣ + i ΔOᵢ)ᴴ(ΔOᵣ + i ΔOᵢ)] = ΔOᵣᵀ ΔOᵣ + ΔOᵢᵀ ΔOᵢ = [ΔOᵣ ΔOᵢ]ᵀ [ΔOᵣ ΔOᵢ]
     return jax.tree_multimap(
@@ -106,35 +113,56 @@ def vmap_grad_centered(
     if mode == "real":
         # Apply real-imaginary split
         params, reassemble = tree_to_real(params)
-        # Preapply model state and reassemble to forward_fn, restrict to one sample
+
         def f(W, σ):
-            return forward_fn(
-                {"params": reassemble(W), **model_state}, σ[jnp.newaxis, :]
-            )[0]
+            return f(reassemble(W), σ)
 
         return vmap_grad_centered_real_holo(f, params, samples)
+
     elif mode == "complex":
         # Apply real-imaginary split
         params, reassemble = tree_to_real(params)
-        # Preapply model state and reassemble to forward_fn, restrict to one sample
-        def f(W, σ):
-            return forward_fn(
-                {"params": reassemble(W), **model_state}, σ[jnp.newaxis, :]
-            )[0]
 
-        return vmap_grad_centered_cplx(f, params, samples)
+        def f_(W, σ):
+            return f(reassemble(W), σ)
+
+        return vmap_grad_centered_cplx(f_, params, samples)
+
     elif mode == "holomorphic":
-        # Preapply model state and reassemble to forward_fn, restrict to one sample
-        def f(W, σ):
-            return forward_fn({"params": W, **model_state}, σ[jnp.newaxis, :])[0]
-
         return vmap_grad_centered_real_holo(f, params, samples)
+
     else:
         raise NotImplementedError(
             'Differentiation mode should be one of "real", "complex", "auto", or "holomorphic", got {}'.format(
                 mode
             )
         )
+
+
+def _prepare_doks(
+    forward_fn: Callable,
+    params: PyTree,
+    samples: Array,
+    model_state: Optional[PyTree],
+    mode: str,
+    rescale_shift: bool,
+) -> PyTree:
+
+    doks = vmap_grad_centered(f, params, samples, model_state, mode)
+    n_samp = samples.shape[0] * n_nodes  # MPI
+    doks = jax.tree_map(lambda x: x / np.sqrt(n_samp), doks)
+
+    if rescale_shift:
+        scale = jax.tree_map(
+            lambda x: sum_inplace(jnp.sum((x * x.conj()).real, axis=0, keepdims=True))
+            ** 0.5,
+            doks,
+        )
+        doks = jax.tree_multimap(jnp.divide, doks, scale)
+        scale = jax.tree_map(partial(jnp.squeeze, axis=0), scale)
+        return doks, scale
+    else:
+        return doks, None
 
 
 @partial(jax.jit, static_argnums=(0, 4, 5))
@@ -167,21 +195,9 @@ def prepare_doks(
             pytree containing the norms that were divided out (same shape as params)
 
     """
-    doks = vmap_grad_centered(forward_fn, params, samples, model_state, mode)
-    n_samp = samples.shape[0] * n_nodes  # MPI
-    doks = jax.tree_map(lambda x: x / np.sqrt(n_samp), doks)
 
-    if rescale_shift:
-        scale = jax.tree_map(
-            lambda x: sum_inplace(jnp.sum((x * x.conj()).real, axis=0, keepdims=True))
-            ** 0.5,
-            doks,
-        )
-        doks = jax.tree_multimap(jnp.divide, doks, scale)
-        scale = jax.tree_map(partial(jnp.squeeze, axis=0), scale)
-        return doks, scale
-    else:
-        return doks, None
+    f = partial(forward_fn, **model_state)
+    return _prepare_doks(f, params, samples, mode, rescale_shift)
 
 
 def jvp(oks: PyTree, v: PyTree) -> Array:
