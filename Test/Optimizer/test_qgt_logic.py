@@ -396,6 +396,25 @@ def test_matvec_treemv_modes(e, jit, holomorphic, pardtype, outdtype):
 
 @pytest.mark.parametrize("holomorphic", [True])
 @pytest.mark.parametrize("n_samp", [25, 1024])
+@pytest.mark.parametrize("jit", [True, False])
+@pytest.mark.parametrize("outdtype, pardtype", r_r_test_types)
+def test_S_tree_tensor(e, jit):
+    def f(p, x):
+        return e.f(p["params"], x)
+
+    diag_shift = 0
+
+    doks, _ = sr_treemv_logic.prepare_doks(f, e.params, e.samples, {}, "real", False)
+    tS = sr_treemv_logic.build_S_tree_tensor(doks)
+    actual = sr_treemv_logic.S_tree_tensor_mat_vec(tS, e.v)
+    expected = reassemble_complex(
+        e.S_real @ e.v_real_flat + diag_shift * e.v_real_flat, target=e.target
+    )
+    assert tree_allclose(actual, expected)
+
+
+@pytest.mark.parametrize("holomorphic", [True])
+@pytest.mark.parametrize("n_samp", [25, 1024])
 @pytest.mark.parametrize(
     "outdtype, pardtype", r_r_test_types + c_c_test_types + r_c_test_types
 )
