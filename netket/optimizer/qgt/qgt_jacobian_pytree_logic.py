@@ -56,7 +56,7 @@ def vmap_grad_centered_real_holo(
     forward_fn: Callable, params: PyTree, samples: Array
 ) -> PyTree:
     """Calculates centred Jacobian (i.e., subtracts MPI mean from vmap_grad)"""
-    return sub_mean(vmap_grad_rr_cc(forward_fn, params, samples))
+    return sub_mean(vmap_grad_real_holo(forward_fn, params, samples))
 
 
 @partial(jax.vmap, in_axes=(None, None, 0))
@@ -224,3 +224,39 @@ def mat_vec(v: PyTree, oks: PyTree, diag_shift: Scalar) -> PyTree:
         a pytree corresponding to the sr matrix-vector product (S + δ) v
     """
     return tree_axpy(diag_shift, v, _mat_vec(v, oks))
+
+
+# the implementation
+
+
+def tree_tensor_tensor(t1, t2, axes):
+    td = lambda x, y: np.tensordot(x, y, axes=axes)
+    td2 = lambda x: jax.tree_map(lambda y: td(x, y), t2)
+    return jax.tree_map(td2, t1)
+
+
+def tree_tensordot(tA, tx):
+    td = lambda A, x: np.tensordot(A, x, axes=x.ndim)
+    return jax.tree_util.tree_reduce(jax.lax.add, jax.tree_map(td, tA, tx))
+
+
+def tree_map_tensordot(tA, tx):
+    # TODO simpler is_leaf?
+    leafdef = jax.tree_structure(tx)
+    is_leaf = lambda l: jax.tree_structure(l) == leafdef
+    return jax.tree_map(lambda lA: tree_tensordot(lA, tx), tA, is_leaf=is_leaf)
+
+
+# the interface:
+# usage:
+# tS = build_S_tree_tensor(doks)
+# S_tree_tensor_mat_vec(tS, v)
+
+
+def build_S_tree_tensor(oks):
+    return tree_tensor_tensor(tree_conj(oks), oks, axes=(0, 0))
+
+
+S_tree_tensor_mat_vec = tree_map_tensordot
+
+# TODO diag_shift

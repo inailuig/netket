@@ -9,7 +9,7 @@ import numpy as np
 from jax.scipy.sparse.linalg import cg
 from netket.optimizer.qgt import (
     qgt_onthefly_logic as sr_onthefly_logic,
-    treemv_logic as sr_treemv_logic,
+    qgt_jacobian_pytree_logic as sr_treemv_logic,
 )
 from functools import partial
 import itertools
@@ -334,6 +334,25 @@ def test_matvec_treemv(e, jit, holomorphic):
 
     doks = pdoks(e.f, e.params, e.samples)
     actual = mv(e.v, doks, diag_shift)
+    expected = reassemble_complex(
+        e.S_real @ e.v_real_flat + diag_shift * e.v_real_flat, target=e.target
+    )
+    assert tree_allclose(actual, expected)
+
+
+@pytest.mark.parametrize("holomorphic", [True])
+@pytest.mark.parametrize("n_samp", [25, 1024])
+@pytest.mark.parametrize("jit", [True, False])
+@pytest.mark.parametrize("outdtype, pardtype", r_r_test_types)
+def test_S_tree_tensor(e, jit):
+    def f(p, x):
+        return e.f(p["params"], x)
+
+    diag_shift = 0
+
+    doks, _ = sr_treemv_logic.prepare_doks(f, e.params, e.samples, {}, "real", False)
+    tS = sr_treemv_logic.build_S_tree_tensor(doks)
+    actual = sr_treemv_logic.S_tree_tensor_mat_vec(tS, e.v)
     expected = reassemble_complex(
         e.S_real @ e.v_real_flat + diag_shift * e.v_real_flat, target=e.target
     )
