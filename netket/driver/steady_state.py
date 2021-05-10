@@ -54,7 +54,8 @@ class SteadyState(AbstractVariationalDriver):
             preconditioner: Determines which preconditioner to use for the loss gradient.
                 This must be a tuple of `(object, solver)` as documented in the section
                 `preconditioners` in the documentation. The standard preconditioner
-                included with NetKet is Stochastic Reconfiguration.
+                included with NetKet is Stochastic Reconfiguration. By default, no preconditioner
+                is used and the bare gradient is passed to the optimizer.
             preconditioner_restart: Whever to use information from the last preconditioning
                 to speed up the process at the following iteration.
 
