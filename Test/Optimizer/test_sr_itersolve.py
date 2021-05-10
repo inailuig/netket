@@ -20,6 +20,7 @@ from .. import common
 QGT_objects = {}
 
 QGT_objects["OnTheFly"] = qgt.QGTOnTheFly
+QGT_objects["JacobianPyTree"] = partial(qgt.QGTJacobianPyTree, mode="auto")
 
 solvers = {}
 solvers["gmres"] = jax.scipy.sparse.linalg.gmres
@@ -112,7 +113,7 @@ def test_qgt_matmul(qgt, vstate, _mpi_size, _mpi_rank):
     "solver",
     [pytest.param(solver, id=name) for name, solver in solvers.items()],
 )
-def test_srjacobian_solve(vstate, solver, _mpi_size, _mpi_rank):
+def test_qgtjacobian_solve(vstate, solver, _mpi_size, _mpi_rank):
     if vstate.model.dtype is float:
         qgtT = partial(qgt.QGTJacobianDense, mode="R2R")
     else:
@@ -138,7 +139,7 @@ def test_srjacobian_solve(vstate, solver, _mpi_size, _mpi_rank):
 
 # TODO: this test only tests r2r and holo, but should also do r2c.
 # to add in a future rewrite
-def test_srjacobian_matmul(vstate, _mpi_size, _mpi_rank):
+def test_qgtjacobian_matmul(vstate, _mpi_size, _mpi_rank):
     if vstate.model.dtype is float:
         qgtT = partial(qgt.QGTJacobianDense, mode="R2R")
     else:
