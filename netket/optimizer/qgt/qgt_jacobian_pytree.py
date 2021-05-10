@@ -143,7 +143,7 @@ class QGTJacobianPyTreeT(LinearOperator):
         result, _ = nkjax.tree_ravel(result)
         return result
 
-    @partial(jax.jit, static_argnums=1)
+    @jax.jit
     def _solve(self, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None) -> PyTree:
         """
         Solve the linear system x=⟨S⟩⁻¹⟨y⟩ with the chosen iterataive solver.
