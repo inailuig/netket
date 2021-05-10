@@ -125,6 +125,7 @@
    :hidden:
 
    docs/custom_models
+   docs/custom_preconditioners
 
 .. toctree::
    :maxdepth: 2
