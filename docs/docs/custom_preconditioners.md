@@ -40,7 +40,7 @@ The bare-minimum API a preconditioner `object` must implement:
 
 	- There must be a function to build it from a variational state. This function will be called with the variational state as the first positional argument.  This function must not necessarily be a method of the class. 
 
-	- This class must have a `solve(self, gradient, *, x0=None)` method taking as argument the gradient to be preconditioned and must not error if a keyword argument `x0` is passed to it. `x0` is the output of `solve` the last time it has been called, and might be ignored if not needed. 
+	- This class must have a `solve(self, function, gradient, *, x0=None)` method taking as argument the gradient to be preconditioned and must not error if a keyword argument `x0` is passed to it. `x0` is the output of `solve` the last time it has been called, and might be ignored if not needed. `function` is the function computing the preconditioner.
 
 You can subclass the abstract base class :ref`nk.optimizer.PreconditionerObject` to be sure that you are
 implementing the correct interface, but you are not obliged to subclass it.
@@ -49,7 +49,7 @@ When you implement such an interface you are left with maximum flexibility, howe
 
 ```python
 
-class MyObject(variational_state):
+def MyObject(variational_state):
 	stuff_a, stuff_b = compute_stuff(variational_state)
 	return MyObjectT(stuff_a, stuff_b)
 
@@ -57,7 +57,7 @@ class MyObjectT:
 	def __init__(self, a,b):
 		# setup this object
 
-	def solve(self, solve_fun, y, *, x0=None):
+	def solve(self, preconditioner_function, y, *, x0=None):
 		# prepare
 		...
 		# compute
@@ -66,6 +66,10 @@ class MyObjectT:
 
 Be warned that if you want to :ref:`jax.jit` compile the solve method, as it is usually computationally intensive, you must either specify how to flatten and unflatten to a PyTree your `MyObjectT`, or you should mark it as a `flax.struct.dataclass`, which is a frozen dataclass which does that automatically.
 Since you cannot write the `__init__` method for a frozen dataclas, we usually define a constructor function as shown above. 
+
+You might be asking why we have each object have a `solve` method, and pass it the preconditioner function isntead of the over way around. The reason for this is to invert the control: `preconditioner_function`s must obey a certain API, but even if they do, different objects might need to perform some different initialization to compute the precondition in a more efficient way. 
+This architecture allows every object to run arbitrary logic before actually executing the preconditioner of choice.
+Particular examples of this approach can be seen by looking at the implementation of :ref:`netket.optimizer.qgt.QGTJacobianDense` and :ref:`netket.optimizer.qgt.QGTJacobianPyTree`. 
 
 #### LinearOperator interface
 
@@ -81,7 +85,7 @@ To implement the LinearOperator interface you should implement the following met
 
 ```python
 
-class MyLinearOperator(variational_state):
+def MyLinearOperator(variational_state):
 	stuff_a, stuff_b = compute_stuff(variational_state)
 	return MyLinearOperatorT(stuff_a, stuff_b)
 
@@ -115,11 +119,23 @@ as static (even though it is).  The x0 is an optional argument which must be acc
 Optionally, one can also define the `to_dense` method.
 
 
+### The preconditioner function API
 
+The preconditioner function must have the following signature:
 
+```python
+def preconditioner_function(object, gradient, *, x0=None):
+	#...
+	return preconditioned_gradient, x0
+```
 
+The object that will be passed is the selected preconditioner object, previously constructed. 
+The gradient is the gradient of the loss function to precondition.
+x0 is an optional initial condition that might be ignored.
 
-
+The gradient might be a PyTree version or a dense ravelling of the PyTree. The result of the function should be a preconditioned gradient with the same format.
+Additional keyword argument can be present, and will in general be set through a closure or `functools.partial`, because this function will be called with the signature above.
+If you have a peculiar preconditioner, you can assume that `preconditioner_function` will be called only from your `preconditioner object`, but in general it is good practice respecting the interface above so that different functions can work with different objects.
 
 
 
