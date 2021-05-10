@@ -65,6 +65,8 @@ def test_qgt_solve(qgt, vstate, solver, _mpi_size, _mpi_rank):
     S = qgt(vstate)
     x, _ = S.solve(solver, vstate.parameters)
 
+    jax.tree_multimap(lambda a, b: np.testing.assert_allclose(a, b), S @ x, vstate.parameters)
+
     if _mpi_size > 1:
         # other check
         with common.netket_disable_mpi():
