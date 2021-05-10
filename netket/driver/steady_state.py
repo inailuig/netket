@@ -38,6 +38,8 @@ class SteadyState(AbstractVariationalDriver):
         optimizer,
         *args,
         variational_state=None,
+        preconditioner=None,
+        preconditioner_restart: bool = False,
         sr=None,
         sr_restart=False,
         **kwargs,
@@ -49,23 +51,39 @@ class SteadyState(AbstractVariationalDriver):
             lindbladian: The Lindbladian of the system.
             optimizer: Determines how optimization steps are performed given the
                 bare energy gradient.
-            sr: Determines whether and how stochastic reconfiguration
-                is applied to the bare energy gradient before performing applying
-                the optimizer. If this parameter is not passed or None, SR is not used.
-            sr_restart: whever to restart the SR solver at every iteration, or use the
-                previous result to speed it up
+            preconditioner: Determines which preconditioner to use for the loss gradient.
+                This must be a tuple of `(object, solver)` as documented in the section
+                `preconditioners` in the documentation. The standard preconditioner
+                included with NetKet is Stochastic Reconfiguration.
+            preconditioner_restart: Whever to use information from the last preconditioning
+                to speed up the process at the following iteration.
 
         """
         if variational_state is None:
             variational_state = MCMixedState(*args, **kwargs)
+
+        if sr is not None:
+            if preconditioner is not None:
+                raise ValueError(
+                    "sr is deprecated in favour of preconditioner kwarg. You should not pass both"
+                )
+            else:
+                preconditioner = sr
+        if preconditioner_restart is not None:
+            if sr_restart is not None:
+                raise ValueError(
+                    "sr_restart is deprecated in favour of preconditioner_restart kwarg. You should not pass both"
+                )
+            else:
+                preconditioner_restart = sr_restart
 
         super().__init__(variational_state, optimizer, minimized_quantity_name="LdagL")
 
         self._lind = lindbladian
         self._ldag_l = Squared(lindbladian)
 
-        self.sr = sr
-        self.sr_restart = sr_restart
+        self.preconditioner = preconditioner
+        self.preconditioner_restart = preconditioner_restart
 
         self._dp = None
         self._S = None
@@ -85,11 +103,13 @@ class SteadyState(AbstractVariationalDriver):
         self._loss_stats, self._loss_grad = self.state.expect_and_grad(self._ldag_l)
 
         if self.sr is not None:
-            self._S = self.state.quantum_geometric_tensor(self.sr)
+            self._S = self.preconditioner[0](self.state)
 
             # use the previous solution as an initial guess to speed up the solution of the linear system
-            x0 = self._dp if self.sr_restart is False else None
-            self._dp, self._sr_info = self._S.solve(self._loss_grad, x0=x0)
+            x0 = self._dp if self.preconditioner_restart is False else None
+            self._dp, self._sr_info = self._S.solve(
+                self.preconditioner[1], self._loss_grad, x0=x0
+            )
         else:
             # tree_map(lambda x, y: x if is_ccomplex(y) else x.real, self._grads, self.state.parameters)
             self._dp = self._loss_grad

@@ -29,7 +29,7 @@ default_iterative = "cg"
 
 from ..qgt import QGTAuto
 
-Preconditioner = namedtuple("Preconditioner", ["solver", "object"])
+Preconditioner = namedtuple("Preconditioner", ["object", "solver"])
 
 
 @wraps_legacy(SR_legacy, "machine", AbstractMachine)

@@ -51,23 +51,13 @@ class VMC(AbstractVariationalDriver):
             hamiltonian: The Hamiltonian of the system.
             optimizer: Determines how optimization steps are performed given the
                 bare energy gradient.
-            preconditioner: Determines whether and how stochastic reconfiguration
-                is applied to the bare energy gradient before performing applying
-                the optimizer. If this parameter is not passed or None, SR is not used.
-            sr_restart: whever to restart the SR solver at every iteration, or use the
-                previous result to speed it up
+            preconditioner: Determines which preconditioner to use for the loss gradient.
+                This must be a tuple of `(object, solver)` as documented in the section
+                `preconditioners` in the documentation. The standard preconditioner
+                included with NetKet is Stochastic Reconfiguration.
+            preconditioner_restart: Whever to use information from the last preconditioning
+                to speed up the process at the following iteration.
 
-        Example:
-            Optimizing a 1D wavefunction with Variational Monte Carlo.
-
-            >>> import netket as nk
-            >>> hi = nk.hilbert.Spin(s=1 / 2, N=g.n_nodes)
-            >>> ha = nk.operator.Ising(hilbert=hi, graph=g, h=1.0)
-            >>> ma = nk.models.RBM(alpha=1, use_visible_bias=True, dtype=float)
-            >>> sa = nk.sampler.MetropolisLocal(hi, n_chains=16)
-            >>> op = nk.optimizer.Sgd(learning_rate=0.1)
-            >>> gs = nk.driver.VMC(ha, op, sa, ma, n_samples=1000, n_discard=50)
-            >>> gs.run(n_iter=300, out="test")
         """
         if variational_state is None:
             variational_state = MCState(*args, **kwargs)
@@ -120,12 +110,12 @@ class VMC(AbstractVariationalDriver):
         self._loss_stats, self._loss_grad = self.state.expect_and_grad(self._ham)
 
         if self.preconditioner is not None:
-            self._S = self.preconditioner.object(self.state)
+            self._S = self.preconditioner[0](self.state)
 
             # use the previous solution as an initial guess to speed up the solution of the linear system
             x0 = self._dp if self.preconditioner_restart is False else None
             self._dp, self._sr_info = self._S.solve(
-                self.preconditioner.solver, self._loss_grad, x0=x0
+                self.preconditioner[1], self._loss_grad, x0=x0
             )
         else:
             # tree_map(lambda x, y: x if is_ccomplex(y) else x.real, self._grads, self.state.parameters)
