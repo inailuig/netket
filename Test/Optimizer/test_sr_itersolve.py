@@ -107,6 +107,32 @@ def test_qgt_matmul(qgt, vstate, _mpi_size, _mpi_rank):
             jax.tree_multimap(lambda a, b: np.testing.assert_allclose(a, b), x, x_all)
 
 
+@pytest.mark.parametrize(
+    "qgt",
+    [pytest.param(sr, id=name) for name, sr in QGT_objects.items()],
+)
+def test_qgt_dense(qgt, vstate, _mpi_size, _mpi_rank):
+    S = qgt(vstate)
+
+    Sd = S.to_dense()
+
+    if _mpi_size > 1:
+        # other check
+        with common.netket_disable_mpi():
+            import mpi4jax
+
+            samples, _ = mpi4jax.allgather(
+                vstate.samples, comm=nk.utils.mpi.MPI_jax_comm
+            )
+            assert samples.shape == (_mpi_size, *vstate.samples.shape)
+            vstate._samples = samples.reshape((-1, *vstate.samples.shape[1:]))
+
+            S = qgt(vstate)
+            Sd_all = S.to_dense()
+
+            np.testing.assert_allclose(Sd_all, Sd, rtol=1e-5)
+
+
 # TODO: this test only tests r2r and holo, but should also do r2c.
 # to add in a future rewrite
 @pytest.mark.parametrize(
