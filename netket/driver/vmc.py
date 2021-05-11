@@ -39,7 +39,7 @@ class VMC(AbstractVariationalDriver):
         *args,
         variational_state=None,
         preconditioner=None,
-        preconditioner_restart: bool = False,
+        preconditioner_restart: bool = None,
         sr=None,
         sr_restart: bool = None,
         **kwargs,
@@ -78,13 +78,17 @@ class VMC(AbstractVariationalDriver):
                 )
             else:
                 preconditioner = sr
-        if preconditioner_restart is not None:
-            if sr_restart is not None:
+        if sr_restart is not None:
+            if preconditioner_restart is not None:
                 raise ValueError(
                     "sr_restart is deprecated in favour of preconditioner_restart kwarg. You should not pass both"
                 )
             else:
                 preconditioner_restart = sr_restart
+
+        # default value. After deprecation move as kwarg
+        if preconditioner_restart is None:
+            preconditioner_restart = False
 
         super().__init__(variational_state, optimizer, minimized_quantity_name="Energy")
 
