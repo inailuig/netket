@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Callable, Optional, Union, Tuple, Any
-from functools import partial
+from typing import Callable, Optional, Union, Tuple, Any, Sequence
+from functools import partial, reduce
 
 import jax
 from jax import numpy as jnp
@@ -101,7 +101,8 @@ class QGTJacobianPyTreeT(LinearOperator):
         return __solve(self, solve_fun, y, x0)
 
     def to_dense(self) -> jnp.ndarray:
-        return _to_dense(self)
+        # return _to_dense(self)
+        return QGTJacobian_(self.O)
 
 
 @jax.jit
@@ -218,3 +219,44 @@ def _to_dense(self) -> jnp.ndarray:
     I = jax.numpy.eye(Npars)
 
     return jax.vmap(self._split_matmul, in_axes=0)(I)
+
+
+# prod = partial(reduce, mul)
+#
+# @struct.dataclass
+# class _arrayshape:
+#    shape : Sequence[int]
+#    dtype : Any
+#
+#    @property
+#    def ndim(self):
+#        return len(self.shape)
+#
+#    @property
+#    def size(self):
+#        return prod(self.shape)
+#
+# def shapeonly(x):
+#    return arrayshape(x.shape, x.dtype)
+
+
+def QGTJacobian_(O):
+    S = build_S_tree_tensor(O)
+    shape = jax.tree_map(lambda x: x[0], O)
+    # shape = jax.tree_map(lambda x: _arrayshape(x.shape[1:], x.dtype), O)
+    treedef = jax.tree_structure(O)
+    return QGTJacobian_T(S=S, shape=shape, treedef=treedef)
+
+
+@struct.dataclass
+class QGTJacobian_T(LinearOperator):
+
+    S: PyTree = None
+    shape: PyTree = None
+    treedef: PyTree = None
+
+    def __matmul__(self, vec):
+        return S_tree_tensor_mat_vec(self.S, vec, self.treedef)
+
+    def to_dense(self) -> jnp.ndarray:
+        return todense(self.S, self.treedef, self.shape)
