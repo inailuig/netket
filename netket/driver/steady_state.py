@@ -18,7 +18,7 @@ import jax
 import jax.numpy as jnp
 from jax.tree_util import tree_map
 
-from netket.operator import Squared
+from netket.operator import Squared, AbstractSuperOperator
 from netket.stats import Stats
 
 from netket.variational import MCMixedState
@@ -62,6 +62,9 @@ class SteadyState(AbstractVariationalDriver):
         """
         if variational_state is None:
             variational_state = MCMixedState(*args, **kwargs)
+
+        if not isinstance(lindbladian, AbstractSuperOperator):
+            raise TypeError("The first argument must be a super-operator")
 
         if sr is not None:
             if preconditioner is not None:
@@ -107,7 +110,7 @@ class SteadyState(AbstractVariationalDriver):
         # Compute the local energy estimator and average Energy
         self._loss_stats, self._loss_grad = self.state.expect_and_grad(self._ldag_l)
 
-        if self.sr is not None:
+        if self.preconditioner is not None:
             self._S = self.preconditioner[0](self.state)
 
             # use the previous solution as an initial guess to speed up the solution of the linear system
