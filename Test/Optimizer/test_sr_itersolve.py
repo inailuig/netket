@@ -22,8 +22,10 @@ from .. import common
 
 QGT_objects = {}
 
-QGT_objects["OnTheFly"] = qgt.QGTOnTheFly
-QGT_objects["JacobianPyTree"] = partial(qgt.QGTJacobianPyTree, mode="auto")
+QGT_objects["OnTheFly"] = partial(qgt.QGTOnTheFly, diag_shift=0.01)
+QGT_objects["JacobianPyTree"] = partial(
+    qgt.QGTJacobianPyTree, mode="auto", diag_shift=0.01
+)
 
 solvers = {}
 solvers["gmres"] = jax.scipy.sparse.linalg.gmres
@@ -94,7 +96,17 @@ def test_qgt_solve(qgt, vstate, solver, _mpi_size, _mpi_rank):
 )
 def test_qgt_matmul(qgt, vstate, _mpi_size, _mpi_rank):
     S = qgt(vstate)
-    x = S @ vstate.parameters
+    y = vstate.parameters
+    x = S @ y
+
+    # test multiplication by dense gives same result...
+    y_dense, unravel = nk.jax.tree_ravel(y)
+    x_dense = S @ y_dense
+    x_dense_unravelled = unravel(x_dense)
+
+    jax.tree_multimap(
+        lambda a, b: np.testing.assert_allclose(a, b), x, x_dense_unravelled
+    )
 
     if _mpi_size > 1:
         # other check
@@ -108,7 +120,7 @@ def test_qgt_matmul(qgt, vstate, _mpi_size, _mpi_rank):
             vstate._samples = samples.reshape((-1, *vstate.samples.shape[1:]))
 
             S = qgt(vstate)
-            x_all = S @ vstate.parameters
+            x_all = S @ y
 
             jax.tree_multimap(lambda a, b: np.testing.assert_allclose(a, b), x, x_all)
 
@@ -136,7 +148,7 @@ def test_qgt_dense(qgt, vstate, _mpi_size, _mpi_rank):
             S = qgt(vstate)
             Sd_all = S.to_dense()
 
-            np.testing.assert_allclose(Sd_all, Sd, rtol=1e-5)
+            np.testing.assert_allclose(Sd_all, Sd, rtol=1e-5, atol=1e-17)
 
 
 # TODO: this test only tests r2r and holo, but should also do r2c.
@@ -180,7 +192,17 @@ def test_qgtjacobian_matmul(vstate, _mpi_size, _mpi_rank):
         qgtT = partial(qgt.QGTJacobianDense, mode="holomorphic")
 
     S = qgtT(vstate)
-    x = S @ vstate.parameters
+    y = vstate.parameters
+    x = S @ y
+
+    # test multiplication by dense gives same result...
+    y_dense, unravel = nk.jax.tree_ravel(y)
+    x_dense = S @ y_dense
+    x_dense_unravelled = unravel(x_dense)
+
+    jax.tree_multimap(
+        lambda a, b: np.testing.assert_allclose(a, b), x, x_dense_unravelled
+    )
 
     if _mpi_size > 1:
         # other check
@@ -194,9 +216,36 @@ def test_qgtjacobian_matmul(vstate, _mpi_size, _mpi_rank):
             vstate._samples = samples.reshape((-1, *vstate.samples.shape[1:]))
 
             S = qgtT(vstate)
-            x_all = S @ vstate.parameters
+            x_all = S @ y
 
             jax.tree_multimap(lambda a, b: np.testing.assert_allclose(a, b), x, x_all)
+
+
+def test_qgtjacobian_dense(vstate, _mpi_size, _mpi_rank):
+    if vstate.model.dtype is float:
+        qgtT = partial(qgt.QGTJacobianDense, mode="R2R")
+    else:
+        qgtT = partial(qgt.QGTJacobianDense, mode="holomorphic")
+
+    S = qgtT(vstate)
+
+    Sd = S.to_dense()
+
+    if _mpi_size > 1:
+        # other check
+        with common.netket_disable_mpi():
+            import mpi4jax
+
+            samples, _ = mpi4jax.allgather(
+                vstate.samples, comm=nk.utils.mpi.MPI_jax_comm
+            )
+            assert samples.shape == (_mpi_size, *vstate.samples.shape)
+            vstate._samples = samples.reshape((-1, *vstate.samples.shape[1:]))
+
+            S = qgtT(vstate)
+            Sd_all = S.to_dense()
+
+            np.testing.assert_allclose(Sd_all, Sd, rtol=1e-5)
 
 
 # TODO test QGTJacobianPyTree
