@@ -20,8 +20,9 @@ def svd(A, b, rcond=None, x0=None):
     A = A.to_dense()
     b, unravel = tree_ravel(b)
 
-    x = jnp.linalg.lstsq(A, b, rcond=rcond)
-    return unravel(x), None
+    x, residuals, rank, s = jnp.linalg.lstsq(A, b, rcond=rcond)
+
+    return unravel(x), (residuals, rank, s)
 
 
 def cholesky(A, b, lower=False, x0=None):

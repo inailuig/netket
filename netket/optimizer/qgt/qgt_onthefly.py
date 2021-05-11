@@ -81,7 +81,7 @@ class QGTOnTheFlyT(LinearOperator):
     def __matmul__(self, y):
         return onthefly_mat_treevec(self, y)
 
-    @partial(jax.jit)
+    @jax.jit
     def _solve(self, solve_fun, y: PyTree, *, x0: Optional[PyTree], **kwargs) -> PyTree:
 
         y = tree_cast(y, self.params)

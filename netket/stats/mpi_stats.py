@@ -32,7 +32,6 @@ def subtract_mean(x, axis=None):
         The resulting array.
 
     """
-    print("subtracting mean for ", mpi.n_nodes)
     # here we keep the dims, since automatic broadcasting of a scalar (shape () ) to an array produces errors
     # when used inside of a function which is transposed with jax.linear_transpose
     x_mean = mean(x, axis=axis, keepdims=True)

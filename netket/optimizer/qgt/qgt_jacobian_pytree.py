@@ -38,7 +38,7 @@ def QGTJacobianPyTree(
             jax.eval_shape(
                 vstate._apply_fun,
                 {"params": vstate.parameters, **vstate.model_state},
-                vstate.samples,
+                vstate.samples.reshape(-1, vstate.samples.shape[-1]),
             )
         )
 
@@ -47,7 +47,7 @@ def QGTJacobianPyTree(
     O, scale = prepare_centered_oks(
         vstate._apply_fun,
         vstate.parameters,
-        vstate.samples,
+        vstate.samples.reshape(-1, vstate.samples.shape[-1]),
         vstate.model_state,
         mode,
         rescale_shift,
@@ -118,10 +118,6 @@ class QGTJacobianPyTreeT(LinearOperator):
             result, _ = nkjax.tree_ravel(result)
 
         return result
-
-    @jax.jit
-    def _unscaled_matmul(self, vec: PyTree) -> PyTree:
-        return mat_vec(vec, self.O, self.diag_shift)
 
     @jax.jit
     def _split_matmul(self, vec: Array) -> Array:

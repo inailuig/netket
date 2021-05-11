@@ -89,13 +89,6 @@ class QGTJacobianDenseT(LinearOperator):
             return unravel(result)
 
     @jax.jit
-    def _unscaled_matmul(self, vec: jnp.ndarray) -> jnp.ndarray:
-        return (
-            sum_inplace(((self.O @ vec).T.conj() @ self.O).T.conj())
-            + self.diag_shift * vec
-        )
-
-    @jax.jit
     def _solve(self, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None) -> PyTree:
         """
         Solve the linear system x=⟨S⟩⁻¹⟨y⟩ with the chosen iterataive solver.
