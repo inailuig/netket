@@ -26,7 +26,13 @@ import netket.jax as nkjax
 
 from ..linear_operator import LinearOperator, Uninitialized
 
-from .qgt_jacobian_pytree_logic import mat_vec, prepare_centered_oks
+from .qgt_jacobian_pytree_logic import (
+    mat_vec,
+    prepare_centered_oks,
+    build_S_tree_tensor,
+    S_tree_tensor_mat_vec,
+    S_tree_tensor_to_dense,
+)
 
 
 def QGTJacobianPyTree(
@@ -259,4 +265,4 @@ class QGTJacobian_T(LinearOperator):
         return S_tree_tensor_mat_vec(self.S, vec, self.treedef)
 
     def to_dense(self) -> jnp.ndarray:
-        return todense(self.S, self.treedef, self.shape)
+        return S_tree_tensor_to_dense(self.S, self.treedef, self.shape)

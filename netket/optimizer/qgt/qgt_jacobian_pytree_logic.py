@@ -362,4 +362,6 @@ def S_tree_tensor_mat_vec(tA, tx, leafdef=None):
     return _S_tree_tensor_mat_vec(tA, tx, leafdef)
 
 
+S_tree_tensor_to_dense = jax.jit(todense, static_argnums=(1,))
+
 # TODO diag_shift
