@@ -99,6 +99,9 @@ def test_qgt_matmul(qgt, vstate, _mpi_size, _mpi_rank):
     y = vstate.parameters
     x = S @ y
 
+    assert S.ndim == 2
+    assert S.shape == (vstate.n_parameters, vstate.n_parameters)
+
     # test multiplication by dense gives same result...
     y_dense, unravel = nk.jax.tree_ravel(y)
     x_dense = S @ y_dense
