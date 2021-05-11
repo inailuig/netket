@@ -291,27 +291,27 @@ def mat_vec(v: PyTree, centered_oks: PyTree, diag_shift: Scalar) -> PyTree:
 
 
 def tree_tensor_tensor(t1, t2, axes):
-    td = lambda x, y: np.tensordot(x, y, axes=axes)
+    td = lambda x, y: jnp.tensordot(x, y, axes=axes)
     td2 = lambda x: jax.tree_map(lambda y: td(x, y), t2)
     return jax.tree_map(td2, t1)
 
 
 def tree_tensordot(tA, tx):
-    td = lambda A, x: np.tensordot(A, x, axes=x.ndim)
+    td = lambda A, x: jnp.tensordot(A, x, axes=x.ndim)
     return jax.tree_util.tree_reduce(jax.lax.add, jax.tree_map(td, tA, tx))
 
 
-def tree_map_tensordot(tA, tx):
+def tree_map_tensordot(tA, tx, leafdef=None):
     # TODO simpler is_leaf?
-    leafdef = jax.tree_structure(tx)
+    if leafdef is None:
+        leafdef = jax.tree_structure(tx)
     is_leaf = lambda l: jax.tree_structure(l) == leafdef
     return jax.tree_map(lambda lA: tree_tensordot(lA, tx), tA, is_leaf=is_leaf)
 
 
 # TODO simpler?
-def todense(tree, target):
+def todense(tree, leafdef, target):
 
-    leafdef = jax.tree_structure(target)
     is_leaf = lambda l: jax.tree_structure(l) == leafdef
 
     def fl_tensor_inner_inner_r(t, target):
@@ -347,11 +347,19 @@ def todense(tree, target):
 # S_tree_tensor_mat_vec(tS, v)
 
 
+@jax.jit
 def build_S_tree_tensor(oks):
     return tree_tensor_tensor(tree_conj(oks), oks, axes=(0, 0))
 
 
-S_tree_tensor_mat_vec = tree_map_tensordot
+# TODO jaxlib>1.66
+# S_tree_tensor_mat_vec = jax.jit(tree_map_tensordot, static_argnames='leafdef')
+
+_S_tree_tensor_mat_vec = jax.jit(tree_map_tensordot, static_argnums=2)
+
+
+def S_tree_tensor_mat_vec(tA, tx, leafdef=None):
+    return _S_tree_tensor_mat_vec(tA, tx, leafdef)
 
 
 # TODO diag_shift
