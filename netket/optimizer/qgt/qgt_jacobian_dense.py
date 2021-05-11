@@ -20,8 +20,7 @@ from jax import numpy as jnp
 from flax import struct
 
 from netket.utils.types import PyTree
-from netket.utils.mpi import n_nodes
-from netket.stats import sum_inplace
+from netket.utils import mpi
 import netket.jax as nkjax
 
 from ..linear_operator import LinearOperator, Uninitialized
@@ -77,7 +76,7 @@ class QGTJacobianDenseT(LinearOperator):
             vec = vec * self.scale
 
         result = (
-            sum_inplace(((self.O @ vec).T.conj() @ self.O).T.conj())
+            mpi.mpi_sum_jax(((self.O @ vec).T.conj() @ self.O).T.conj())[0]
             + self.diag_shift * vec
         )
 
@@ -149,7 +148,7 @@ class QGTJacobianDenseT(LinearOperator):
             O = self.O * self.scale[jnp.newaxis, :]
             diag = jnp.diag(self.scale ** 2)
 
-        return sum_inplace(O.T.conj() @ O) + self.diag_shift * diag
+        return mpi.mpi_sum_jax(O.T.conj() @ O)[0] + self.diag_shift * diag
 
 
 @partial(jax.jit, static_argnums=(0, 4, 5))
@@ -172,7 +171,7 @@ def gradients(
 
     if jnp.ndim(samples) != 2:
         samples = jnp.reshape(samples, (-1, samples.shape[-1]))
-    n_samples = samples.shape[0] * n_nodes
+    n_samples = samples.shape[0] * mpi.n_nodes
 
     if mode == "holomorphic":
         # Preapply the model state so that when computing gradient
@@ -232,7 +231,9 @@ def gradients(
 
     if rescale_shift:
         sqrt_Skk = (
-            sum_inplace(jnp.sum((grads * grads.conj()).real, axis=0, keepdims=True))
+            mpi.mpi_sum_jax(
+                jnp.sum((grads * grads.conj()).real, axis=0, keepdims=True)
+            )[0]
             ** 0.5
         )
         return grads / sqrt_Skk, sqrt_Skk.flatten()
@@ -250,6 +251,6 @@ def _grad_vmap_minus_mean(
     grads = jax.vmap(
         jax.grad(fun, holomorphic=holomorphic), in_axes=(None, 0), out_axes=0
     )(params, samples)
-    return grads - sum_inplace(grads.sum(axis=0, keepdims=True)) / (
-        grads.shape[0] * n_nodes
+    return grads - mpi.mpi_sum_jax(grads.sum(axis=0, keepdims=True))[0] / (
+        grads.shape[0] * mpi.n_nodes
     )

@@ -20,7 +20,7 @@ from jax import numpy as jnp
 from flax import struct
 
 from netket.utils.types import PyTree, Array
-from netket.utils.mpi import n_nodes
+from netket.utils import mpi
 from netket.stats import sum_inplace
 import netket.jax as nkjax
 
@@ -127,7 +127,7 @@ class QGTJacobianPyTreeT(LinearOperator):
     def _split_matmul(self, vec: Array) -> Array:
         pars = self.params
         if self.mode != "holomorphic":
-            pars = nkjax.tree_to_real(self.params)
+            pars, _ = nkjax.tree_to_real(pars)
 
         _, unravel = nkjax.tree_ravel(pars)
         vec = unravel(vec)
@@ -195,7 +195,7 @@ class QGTJacobianPyTreeT(LinearOperator):
         pars = self.params
 
         if self.mode != "holomorphic":
-            pars = nkjax.tree_to_real(self.params)
+            pars, _ = nkjax.tree_to_real(pars)
 
         Npars = nkjax.tree_size(pars)
         I = jax.numpy.eye(Npars)
