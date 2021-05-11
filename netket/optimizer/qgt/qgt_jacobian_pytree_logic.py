@@ -308,6 +308,39 @@ def tree_map_tensordot(tA, tx):
     return jax.tree_map(lambda lA: tree_tensordot(lA, tx), tA, is_leaf=is_leaf)
 
 
+# TODO simpler?
+def todense(tree, target):
+
+    leafdef = jax.tree_structure(target)
+    is_leaf = lambda l: jax.tree_structure(l) == leafdef
+
+    def fl_tensor_inner_inner_r(t, target):
+        return t.reshape(t.shape[: -target.ndim] + (-1,))
+
+    def fl_tensor_inner_r(t, target):
+        return jax.tree_multimap(fl_tensor_inner_inner_r, t, target)
+
+    def fl_tensor_r(t, target):
+        return jax.tree_map(lambda l: fl_tensor_inner_r(l, target), t, is_leaf=is_leaf)
+
+    def fl_tensor_l(t):
+        return jax.tree_map(lambda x: x.reshape(-1, x.shape[-1]), t)
+
+    fl_tensor = compose(fl_tensor_l, fl_tensor_r)
+
+    ravel_r = partial(
+        jax.tree_map,
+        jax.vmap(lambda l: nkjax.tree_ravel(l)[0], in_axes=0, out_axes=0),
+        is_leaf=is_leaf,
+    )
+    ravel_l = jax.vmap(lambda l: nkjax.tree_ravel(l)[0], in_axes=1, out_axes=1)
+    ravel = compose(ravel_l, ravel_r)
+
+    _todense = compose(ravel, fl_tensor)
+
+    return _todense(tree, target)
+
+
 # the interface:
 # usage:
 # tS = build_S_tree_tensor(doks)
@@ -319,5 +352,6 @@ def build_S_tree_tensor(oks):
 
 
 S_tree_tensor_mat_vec = tree_map_tensordot
+
 
 # TODO diag_shift
