@@ -87,6 +87,10 @@ class QGTJacobianPyTreeT(LinearOperator):
     mode: str = struct.field(pytree_node=False, default=Uninitialized)
     """Differentiation mode, "auto" is resolved into "real" or "complex" """
 
+    _in_solve: bool = struct.field(pytree_node=False, default=False)
+    """Internal flag used to signal that we are inside the _solve method and matmul should
+    not take apart into real and complex parts the other vector"""
+
     @jax.jit
     def __matmul__(self, vec: Union[PyTree, Array]) -> Union[PyTree, Array]:
         # Turn vector RHS into PyTree
@@ -98,7 +102,8 @@ class QGTJacobianPyTreeT(LinearOperator):
             ravel = False
 
         # Real-imaginary split RHS in R→R and R→C modes
-        if self.mode != "holomorphic":
+        reassemble = None
+        if self.mode != "holomorphic" and not self._in_solve:
             vec, reassemble = nkjax.tree_to_real(vec)
 
         if self.scale is not None:
@@ -110,7 +115,7 @@ class QGTJacobianPyTreeT(LinearOperator):
             result = jax.tree_multimap(jnp.multiply, result, self.scale)
 
         # Reassemble real-imaginary split as needed
-        if self.mode != "holomorphic":
+        if reassemble is not None:
             result = reassemble(result)
 
         # Ravel PyTree back into vector as needed
@@ -166,7 +171,7 @@ class QGTJacobianPyTreeT(LinearOperator):
         # but avoid rescaling, we pass down an object with
         # scale = None
         # mode=holomoprhic to disable splitting the complex part
-        unscaled_self = self.replace(scale=None, mode="holomorphic")
+        unscaled_self = self.replace(scale=None, _in_solve=True)
 
         out, info = solve_fun(unscaled_self, y, x0=x0)
 
@@ -195,4 +200,5 @@ class QGTJacobianPyTreeT(LinearOperator):
 
         Npars = nkjax.tree_size(pars)
         I = jax.numpy.eye(Npars)
+
         return jax.vmap(self._split_matmul, in_axes=0)(I)
