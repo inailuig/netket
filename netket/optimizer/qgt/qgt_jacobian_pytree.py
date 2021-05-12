@@ -20,7 +20,7 @@ from jax import numpy as jnp
 from flax import struct
 
 from netket.utils.types import PyTree, Array
-from netket.utils.mpi import n_nodes
+from netket.utils import mpi
 from netket.stats import sum_inplace
 import netket.jax as nkjax
 
@@ -38,7 +38,7 @@ def QGTJacobianPyTree(
             jax.eval_shape(
                 vstate._apply_fun,
                 {"params": vstate.parameters, **vstate.model_state},
-                vstate.samples,
+                vstate.samples.reshape(-1, vstate.samples.shape[-1]),
             )
         )
 
@@ -47,7 +47,7 @@ def QGTJacobianPyTree(
     O, scale = prepare_centered_oks(
         vstate._apply_fun,
         vstate.parameters,
-        vstate.samples,
+        vstate.samples.reshape(-1, vstate.samples.shape[-1]),
         vstate.model_state,
         mode,
         rescale_shift,
@@ -87,63 +87,16 @@ class QGTJacobianPyTreeT(LinearOperator):
     mode: str = struct.field(pytree_node=False, default=Uninitialized)
     """Differentiation mode, "auto" is resolved into "real" or "complex" """
 
-    @jax.jit
+    _in_solve: bool = struct.field(pytree_node=False, default=False)
+    """Internal flag used to signal that we are inside the _solve method and matmul should
+    not take apart into real and complex parts the other vector"""
+
     def __matmul__(self, vec: Union[PyTree, Array]) -> Union[PyTree, Array]:
-        # Turn vector RHS into PyTree
-        if hasattr(vec, "ndim"):
-            _, unravel = nkjax.tree_ravel(self.params)
-            vec = unravel(vec)
-            ravel = True
-        else:
-            ravel = False
+        return _matmul(self, vec)
 
-        # Real-imaginary split RHS in R→R and R→C modes
-        if self.mode != "holomorphic":
-            vec, reassemble = nkjax.tree_to_real(vec)
-
-        if self.scale is not None:
-            vec = jax.tree_multimap(jnp.multiply, vec, self.scale)
-
-        result = mat_vec(vec, self.O, self.diag_shift)
-
-        if self.scale is not None:
-            result = jax.tree_multimap(jnp.multiply, result, self.scale)
-
-        # Reassemble real-imaginary split as needed
-        if self.mode != "holomorphic":
-            result = reassemble(result)
-
-        # Ravel PyTree back into vector as needed
-        if ravel:
-            result, _ = nkjax.tree_ravel(result)
-
-        return result
-
-    @jax.jit
-    def _unscaled_matmul(self, vec: PyTree) -> PyTree:
-        return mat_vec(vec, self.O, self.diag_shift)
-
-    @jax.jit
     def _split_matmul(self, vec: Array) -> Array:
-        pars = self.params
-        if self.mode != "holomorphic":
-            pars = nkjax.tree_to_real(self.params)
+        return _split_matmul(self, vec)
 
-        _, unravel = nkjax.tree_ravel(pars)
-        vec = unravel(vec)
-
-        if self.scale is not None:
-            vec = jax.tree_multimap(jnp.multiply, vec, self.scale)
-
-        result = mat_vec(vec, self.O, self.diag_shift)
-
-        if self.scale is not None:
-            result = jax.tree_multimap(jnp.multiply, result, self.scale)
-
-        result, _ = nkjax.tree_ravel(result)
-        return result
-
-    @partial(jax.jit, static_argnums=1)
     def _solve(self, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None) -> PyTree:
         """
         Solve the linear system x=⟨S⟩⁻¹⟨y⟩ with the chosen iterataive solver.
@@ -157,33 +110,8 @@ class QGTJacobianPyTreeT(LinearOperator):
             info: optional additional informations provided by the solver. Might be
                 None if there are no additional informations provided.
         """
-        # Real-imaginary split RHS in R→R and R→C modes
-        if self.mode != "holomorphic":
-            y, reassemble = nkjax.tree_to_real(y)
+        return _solve(self, solve_fun, y, x0=x0)
 
-        if self.scale is not None:
-            y = jax.tree_multimap(jnp.divide, y, self.scale)
-            if x0 is not None:
-                x0 = jax.tree_multimap(jnp.multiply, x0, self.scale)
-
-        # to pass the object LinearOperator itself down
-        # but avoid rescaling, we pass down an object with
-        # scale = None
-        # mode=holomoprhic to disable splitting the complex part
-        unscaled_self = self.replace(scale=None, mode="holomorphic")
-
-        out, info = solve_fun(unscaled_self, y, x0=x0)
-
-        if self.scale is not None:
-            out = jax.tree_multimap(jnp.divide, out, self.scale)
-
-        # Reassemble real-imaginary split as needed
-        if self.mode != "holomorphic":
-            out = reassemble(out)
-
-        return out, info
-
-    @jax.jit
     def to_dense(self) -> jnp.ndarray:
         """
         Convert the lazy matrix representation to a dense matrix representation.
@@ -192,11 +120,110 @@ class QGTJacobianPyTreeT(LinearOperator):
             A dense matrix representation of this S matrix.
             In R→R and R→C modes, real and imaginary parts of parameters get own rows/columns
         """
-        pars = self.params
+        return _to_dense(self)
 
-        if self.mode != "holomorphic":
-            pars = nkjax.tree_to_real(self.params)
 
-        Npars = nkjax.tree_size(pars)
-        I = jax.numpy.eye(Npars)
-        return jax.vmap(self._split_matmul, in_axes=0)(I)
+########################################################################################
+#####                                  QGT Logic                                   #####
+########################################################################################
+
+
+@jax.jit
+def _matmul(
+    self: QGTJacobianPyTreeT, vec: Union[PyTree, Array]
+) -> Union[PyTree, Array]:
+    # Turn vector RHS into PyTree
+    if hasattr(vec, "ndim"):
+        _, unravel = nkjax.tree_ravel(self.params)
+        vec = unravel(vec)
+        ravel = True
+    else:
+        ravel = False
+
+    # Real-imaginary split RHS in R→R and R→C modes
+    reassemble = None
+    if self.mode != "holomorphic" and not self._in_solve:
+        vec, reassemble = nkjax.tree_to_real(vec)
+
+    if self.scale is not None:
+        vec = jax.tree_multimap(jnp.multiply, vec, self.scale)
+
+    result = mat_vec(vec, self.O, self.diag_shift)
+
+    if self.scale is not None:
+        result = jax.tree_multimap(jnp.multiply, result, self.scale)
+
+    # Reassemble real-imaginary split as needed
+    if reassemble is not None:
+        result = reassemble(result)
+
+    # Ravel PyTree back into vector as needed
+    if ravel:
+        result, _ = nkjax.tree_ravel(result)
+
+    return result
+
+
+@jax.jit
+def _split_matmul(self: QGTJacobianPyTreeT, vec: Array) -> Array:
+    pars = self.params
+    if self.mode != "holomorphic":
+        pars, _ = nkjax.tree_to_real(pars)
+
+    _, unravel = nkjax.tree_ravel(pars)
+    vec = unravel(vec)
+
+    if self.scale is not None:
+        vec = jax.tree_multimap(jnp.multiply, vec, self.scale)
+
+    result = mat_vec(vec, self.O, self.diag_shift)
+
+    if self.scale is not None:
+        result = jax.tree_multimap(jnp.multiply, result, self.scale)
+
+    result, _ = nkjax.tree_ravel(result)
+    return result
+
+
+@jax.jit
+def _solve(
+    self: QGTJacobianPyTreeT, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None
+) -> PyTree:
+    # Real-imaginary split RHS in R→R and R→C modes
+    if self.mode != "holomorphic":
+        y, reassemble = nkjax.tree_to_real(y)
+
+    if self.scale is not None:
+        y = jax.tree_multimap(jnp.divide, y, self.scale)
+        if x0 is not None:
+            x0 = jax.tree_multimap(jnp.multiply, x0, self.scale)
+
+    # to pass the object LinearOperator itself down
+    # but avoid rescaling, we pass down an object with
+    # scale = None
+    # mode=holomoprhic to disable splitting the complex part
+    unscaled_self = self.replace(scale=None, _in_solve=True)
+
+    out, info = solve_fun(unscaled_self, y, x0=x0)
+
+    if self.scale is not None:
+        out = jax.tree_multimap(jnp.divide, out, self.scale)
+
+    # Reassemble real-imaginary split as needed
+    if self.mode != "holomorphic":
+        out = reassemble(out)
+
+    return out, info
+
+
+@jax.jit
+def _to_dense(self: QGTJacobianPyTreeT) -> jnp.ndarray:
+    pars = self.params
+
+    if self.mode != "holomorphic":
+        pars, _ = nkjax.tree_to_real(pars)
+
+    Npars = nkjax.tree_size(pars)
+    I = jax.numpy.eye(Npars)
+
+    return jax.vmap(self._split_matmul, in_axes=0)(I)

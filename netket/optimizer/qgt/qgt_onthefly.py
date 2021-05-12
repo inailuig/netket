@@ -81,19 +81,9 @@ class QGTOnTheFlyT(LinearOperator):
     def __matmul__(self, y):
         return onthefly_mat_treevec(self, y)
 
-    @partial(jax.jit)
     def _solve(self, solve_fun, y: PyTree, *, x0: Optional[PyTree], **kwargs) -> PyTree:
+        return _solve(self, solve_fun, y, x0=x0)
 
-        y = tree_cast(y, self.params)
-
-        # we could cache this...
-        if x0 is None:
-            x0 = jax.tree_map(jnp.zeros_like, y)
-
-        out, info = solve_fun(self, y, x0=x0)
-        return out, info
-
-    @jax.jit
     def to_dense(self) -> jnp.ndarray:
         """
         Convert the lazy matrix representation to a dense matrix representation.s
@@ -101,9 +91,12 @@ class QGTOnTheFlyT(LinearOperator):
         Returns:
             A dense matrix representation of this S matrix.
         """
-        Npars = nkjax.tree_size(self.params)
-        I = jax.numpy.eye(Npars)
-        return jax.vmap(lambda x: self @ x, in_axes=0)(I)
+        return _to_dense(self)
+
+
+########################################################################################
+#####                                  QGT Logic                                   #####
+########################################################################################
 
 
 @jax.jit
@@ -153,3 +146,31 @@ def onthefly_mat_treevec(
         res, _ = nkjax.tree_ravel(res)
 
     return res
+
+
+@jax.jit
+def _solve(
+    self: QGTOnTheFlyT, solve_fun, y: PyTree, *, x0: Optional[PyTree], **kwargs
+) -> PyTree:
+
+    y = tree_cast(y, self.params)
+
+    # we could cache this...
+    if x0 is None:
+        x0 = jax.tree_map(jnp.zeros_like, y)
+
+    out, info = solve_fun(self, y, x0=x0)
+    return out, info
+
+
+@jax.jit
+def _to_dense(self: QGTOnTheFlyT) -> jnp.ndarray:
+    """
+    Convert the lazy matrix representation to a dense matrix representation.s
+
+    Returns:
+        A dense matrix representation of this S matrix.
+    """
+    Npars = nkjax.tree_size(self.params)
+    I = jax.numpy.eye(Npars)
+    return jax.vmap(lambda x: self @ x, in_axes=0)(I)

@@ -20,8 +20,7 @@ from jax import numpy as jnp
 from flax import struct
 
 from netket.utils.types import PyTree
-from netket.utils.mpi import n_nodes
-from netket.stats import sum_inplace
+from netket.utils import mpi
 import netket.jax as nkjax
 
 from ..linear_operator import LinearOperator, Uninitialized
@@ -66,75 +65,12 @@ class QGTJacobianDenseT(LinearOperator):
     i.e., the sqrt of the diagonal elements of the S matrix
     """
 
-    @jax.jit
     def __matmul__(self, vec: Union[PyTree, jnp.ndarray]) -> Union[PyTree, jnp.ndarray]:
-        if not hasattr(vec, "ndim"):
-            vec, unravel = nkjax.tree_ravel(vec)
-        else:
-            unravel = None
+        return _matmul(self, vec)
 
-        if self.scale is not None:
-            vec = vec * self.scale
-
-        result = (
-            sum_inplace(((self.O @ vec).T.conj() @ self.O).T.conj())
-            + self.diag_shift * vec
-        )
-
-        if self.scale is not None:
-            result = result * self.scale
-
-        if unravel is None:
-            return result
-        else:
-            return unravel(result)
-
-    @jax.jit
-    def _unscaled_matmul(self, vec: jnp.ndarray) -> jnp.ndarray:
-        return (
-            sum_inplace(((self.O @ vec).T.conj() @ self.O).T.conj())
-            + self.diag_shift * vec
-        )
-
-    @partial(jax.jit, static_argnums=1)
     def _solve(self, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None) -> PyTree:
-        """
-        Solve the linear system x=⟨S⟩⁻¹⟨y⟩ with the chosen iterataive solver.
+        return _solve(self, solve_fun, y, x0=x0)
 
-        Args:
-            y: the vector y in the system above.
-            x0: optional initial guess for the solution.
-
-        Returns:
-            x: the PyTree solving the system.
-            info: optional additional informations provided by the solver. Might be
-                None if there are no additional informations provided.
-        """
-
-        # Ravel input PyTrees, record unravelling function too
-        grad, unravel = nkjax.tree_ravel(y)
-
-        if x0 is not None:
-            x0, _ = nkjax.tree_ravel(x0)
-            if self.scale is not None:
-                x0 = x0 * self.scale
-
-        if self.scale is not None:
-            grad = grad / self.scale
-
-        # to pass the object LinearOperator itself down
-        # but avoid rescaling, we pass down an object with
-        # scale = None
-        unscaled_self = self.replace(scale=None)
-
-        out, info = solve_fun(unscaled_self, grad, x0=x0)
-
-        if self.scale is not None:
-            out = out / self.scale
-
-        return unravel(out), info
-
-    @jax.jit
     def to_dense(self) -> jnp.ndarray:
         """
         Convert the lazy matrix representation to a dense matrix representation.
@@ -142,14 +78,83 @@ class QGTJacobianDenseT(LinearOperator):
         Returns:
             A dense matrix representation of this S matrix.
         """
-        if self.scale is None:
-            O = self.O
-            diag = jnp.eye(self.O.shape[1])
-        else:
-            O = self.O * self.scale[jnp.newaxis, :]
-            diag = jnp.diag(self.scale ** 2)
+        return _to_dense(self)
 
-        return sum_inplace(O.T.conj() @ O) + self.diag_shift * diag
+
+########################################################################################
+#####                                  QGT Logic                                   #####
+########################################################################################
+
+
+@jax.jit
+def _matmul(
+    self: QGTJacobianDenseT, vec: Union[PyTree, jnp.ndarray]
+) -> Union[PyTree, jnp.ndarray]:
+    if not hasattr(vec, "ndim"):
+        vec, unravel = nkjax.tree_ravel(vec)
+    else:
+        unravel = None
+
+    if self.scale is not None:
+        vec = vec * self.scale
+
+    result = (
+        mpi.mpi_sum_jax(((self.O @ vec).T.conj() @ self.O).T.conj())[0]
+        + self.diag_shift * vec
+    )
+
+    if self.scale is not None:
+        result = result * self.scale
+
+    if unravel is None:
+        return result
+    else:
+        return unravel(result)
+
+
+@jax.jit
+def _solve(
+    self: QGTJacobianDenseT, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None
+) -> PyTree:
+    # Ravel input PyTrees, record unravelling function too
+    grad, unravel = nkjax.tree_ravel(y)
+
+    if x0 is not None:
+        x0, _ = nkjax.tree_ravel(x0)
+        if self.scale is not None:
+            x0 = x0 * self.scale
+
+    if self.scale is not None:
+        grad = grad / self.scale
+
+    # to pass the object LinearOperator itself down
+    # but avoid rescaling, we pass down an object with
+    # scale = None
+    unscaled_self = self.replace(scale=None)
+
+    out, info = solve_fun(unscaled_self, grad, x0=x0)
+
+    if self.scale is not None:
+        out = out / self.scale
+
+    return unravel(out), info
+
+
+@jax.jit
+def _to_dense(self: QGTJacobianDenseT) -> jnp.ndarray:
+    if self.scale is None:
+        O = self.O
+        diag = jnp.eye(self.O.shape[1])
+    else:
+        O = self.O * self.scale[jnp.newaxis, :]
+        diag = jnp.diag(self.scale ** 2)
+
+    return mpi.mpi_sum_jax(O.T.conj() @ O)[0] + self.diag_shift * diag
+
+
+########################################################################################
+#####                              QGT Construction                                #####
+########################################################################################
 
 
 @partial(jax.jit, static_argnums=(0, 4, 5))
@@ -172,7 +177,7 @@ def gradients(
 
     if jnp.ndim(samples) != 2:
         samples = jnp.reshape(samples, (-1, samples.shape[-1]))
-    n_samples = samples.shape[0] * n_nodes
+    n_samples = samples.shape[0] * mpi.n_nodes
 
     if mode == "holomorphic":
         # Preapply the model state so that when computing gradient
@@ -232,7 +237,9 @@ def gradients(
 
     if rescale_shift:
         sqrt_Skk = (
-            sum_inplace(jnp.sum((grads * grads.conj()).real, axis=0, keepdims=True))
+            mpi.mpi_sum_jax(
+                jnp.sum((grads * grads.conj()).real, axis=0, keepdims=True)
+            )[0]
             ** 0.5
         )
         return grads / sqrt_Skk, sqrt_Skk.flatten()
@@ -250,6 +257,6 @@ def _grad_vmap_minus_mean(
     grads = jax.vmap(
         jax.grad(fun, holomorphic=holomorphic), in_axes=(None, 0), out_axes=0
     )(params, samples)
-    return grads - sum_inplace(grads.sum(axis=0, keepdims=True)) / (
-        grads.shape[0] * n_nodes
+    return grads - mpi.mpi_sum_jax(grads.sum(axis=0, keepdims=True))[0] / (
+        grads.shape[0] * mpi.n_nodes
     )
