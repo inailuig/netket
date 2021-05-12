@@ -30,7 +30,7 @@ from .qgt_jacobian_pytree_logic import mat_vec, prepare_centered_oks
 
 
 def QGTJacobianPyTree(
-    vstate, *, mode="auto", rescale_shift=False, **kwargs
+    vstate, *, mode="auto", rescale_shift=False, flatten=False, **kwargs
 ) -> "QGTJacobianPyTreeT":
     # Choose sensible default mode
     if mode == "auto":
@@ -44,9 +44,16 @@ def QGTJacobianPyTree(
 
         mode = "complex" if complex_output else "real"
 
+    if flatten:
+        params_flat, unravel = jax.flatten_util.ravel_pytree(vstate.parameters)
+
+        def apply_fun_flat(variables, *args, **kwargs):
+            variables = variables.copy({"params": unravel(variables["params"])})
+            return vstate._apply_fun(variables, *args, **kwargs)
+
     O, scale = prepare_centered_oks(
-        vstate._apply_fun,
-        vstate.parameters,
+        apply_fun_flat if flatten else vstate._apply_fun,
+        params_flat if flatten else vstate.parameters,
         vstate.samples.reshape(-1, vstate.samples.shape[-1]),
         vstate.model_state,
         mode,
