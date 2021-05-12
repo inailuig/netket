@@ -20,6 +20,8 @@ import jax
 import jax.flatten_util
 import jax.numpy as jnp
 
+import flax
+
 import numpy as np
 
 from netket.stats import subtract_mean
@@ -220,7 +222,7 @@ def prepare_centered_oks(
 
     # pre-apply the model state
     def forward_fn(W, σ):
-        return apply_fun({"params": W, **model_state}, σ)
+        return apply_fun(flax.core.freeze({"params": W, **model_state}), σ)
 
     if mode == "real":
         split_complex_params = True  # convert C→R and R&C→R to R→R

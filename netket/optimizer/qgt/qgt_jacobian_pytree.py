@@ -36,7 +36,7 @@ from .qgt_jacobian_pytree_logic import (
 
 
 def QGTJacobianPyTree(
-    vstate, *, mode="auto", rescale_shift=False, **kwargs
+    vstate, *, mode="auto", rescale_shift=False, flatten=False, **kwargs
 ) -> "QGTJacobianPyTreeT":
     # Choose sensible default mode
     if mode == "auto":
@@ -50,9 +50,16 @@ def QGTJacobianPyTree(
 
         mode = "complex" if complex_output else "real"
 
+    if flatten:
+        params_flat, unravel = jax.flatten_util.ravel_pytree(vstate.parameters)
+
+        def apply_fun_flat(variables, *args, **kwargs):
+            variables = variables.copy({"params": unravel(variables["params"])})
+            return vstate._apply_fun(variables, *args, **kwargs)
+
     O, scale = prepare_centered_oks(
-        vstate._apply_fun,
-        vstate.parameters,
+        apply_fun_flat if flatten else vstate._apply_fun,
+        params_flat if flatten else vstate.parameters,
         vstate.samples.reshape(-1, vstate.samples.shape[-1]),
         vstate.model_state,
         mode,
@@ -248,9 +255,12 @@ def _to_dense(self) -> jnp.ndarray:
 
 def QGTJacobian_(O):
     S = build_S_tree_tensor(O)
+    if isinstance(S, jnp.ndarray):
+        return S
     shape = jax.tree_map(lambda x: x[0], O)
     # shape = jax.tree_map(lambda x: _arrayshape(x.shape[1:], x.dtype), O)
     treedef = jax.tree_structure(O)
+
     return QGTJacobian_T(S=S, shape=shape, treedef=treedef)
 
 
