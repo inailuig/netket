@@ -37,7 +37,7 @@ from .. import qgt
 )
 def SRLazyCG(diag_shift: float = 0.01, centered: bool = True, **kwargs):
     return SR(
-        matrix=qgt.QGTOnTheFly,
+        qgt.QGTOnTheFly,
         solver=partial(jax.scipy.sparse.linalg.cg, **kwargs),
         diag_shift=diag_shift,
         centered=centered,
@@ -59,7 +59,7 @@ def SRLazyCG(diag_shift: float = 0.01, centered: bool = True, **kwargs):
 )
 def SRLazyGMRES(diag_shift: float = 0.01, centered: bool = True, **kwargs):
     return SR(
-        matrix=qgt.QGTOnTheFly,
+        qgt.QGTOnTheFly,
         solver=partial(jax.scipy.sparse.linalg.gmres, **kwargs),
         diag_shift=diag_shift,
         centered=centered,
