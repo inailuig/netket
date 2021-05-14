@@ -64,3 +64,6 @@ class QGTAuto:
             )
 
         return self._last_matrix(variational_state, *args, **kwargs)
+
+    def __repr__(self):
+        return "QGTAuto()"

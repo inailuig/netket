@@ -39,7 +39,6 @@ class SteadyState(AbstractVariationalDriver):
         *args,
         variational_state=None,
         preconditioner=None,
-        preconditioner_restart: bool = None,
         sr=None,
         sr_restart=False,
         **kwargs,
@@ -56,9 +55,6 @@ class SteadyState(AbstractVariationalDriver):
                 `preconditioners` in the documentation. The standard preconditioner
                 included with NetKet is Stochastic Reconfiguration. By default, no preconditioner
                 is used and the bare gradient is passed to the optimizer.
-            preconditioner_restart: Whever to use information from the last preconditioning
-                to speed up the process at the following iteration.
-
         """
         if variational_state is None:
             variational_state = MCMixedState(*args, **kwargs)
@@ -81,22 +77,23 @@ class SteadyState(AbstractVariationalDriver):
                 )
 
         if sr_restart is not None:
-            if preconditioner_restart is not None:
+            if preconditioner is None:
                 raise ValueError(
-                    "sr_restart is deprecated in favour of preconditioner_restart kwarg. You should not pass both"
+                    "sr_restart only makes sense if you have a preconditioner/SR."
                 )
             else:
-                preconditioner_restart = sr_restart
+                preconditioner.solver_restart = sr_restart
                 warn_deprecation(
                     (
-                        "The `sr_restart` keyword argument is deprecated in favour of `preconditioner_restart`."
-                        "Please update your code to `SteadyState(.., preconditioner_restart=True/False)`"
+                        "The `sr_restart` keyword argument is deprecated in favour of specifiying "
+                        "`solver_restart` in the constructor of the SR object."
+                        "Please update your code to `SteadyState(.., preconditioner=nk.optimizer.SR(..., solver_restart=True/False))`"
                     )
                 )
 
-        # default value. After deprecation move as kwarg
-        if preconditioner_restart is None:
-            preconditioner_restart = False
+        # move as kwarg once deprecations are removed
+        if preconditioner is None:
+            preconditioner = identity_preconditioner
 
         super().__init__(variational_state, optimizer, minimized_quantity_name="LdagL")
 
@@ -104,7 +101,6 @@ class SteadyState(AbstractVariationalDriver):
         self._ldag_l = Squared(lindbladian)
 
         self.preconditioner = preconditioner
-        self.preconditioner_restart = preconditioner_restart
 
         self._dp = None
         self._S = None
@@ -123,17 +119,9 @@ class SteadyState(AbstractVariationalDriver):
         # Compute the local energy estimator and average Energy
         self._loss_stats, self._loss_grad = self.state.expect_and_grad(self._ldag_l)
 
-        if self.preconditioner is not None:
-            self._S = self.preconditioner[0](self.state)
-
-            # use the previous solution as an initial guess to speed up the solution of the linear system
-            x0 = self._dp if self.preconditioner_restart is False else None
-            self._dp, self._sr_info = self._S.solve(
-                self.preconditioner[1], self._loss_grad, x0=x0
-            )
-        else:
-            # tree_map(lambda x, y: x if is_ccomplex(y) else x.real, self._grads, self.state.parameters)
-            self._dp = self._loss_grad
+        # if it's the identity it does
+        # self._dp = self._loss_grad
+        self._dp = self.preconditioner(self.state, self._loss_grad)
 
         # If parameters are real, then take only real part of the gradient (if it's complex)
         self._dp = jax.tree_multimap(

@@ -28,12 +28,13 @@ default_iterative = "cg"
 # default_direct = "eigen"
 
 from ..qgt import QGTAuto
+from ..preconditioner import LinearPreconditioner
 
 Preconditioner = namedtuple("Preconditioner", ["object", "solver"])
 
 
 @wraps_legacy(SR_legacy, "machine", AbstractMachine)
-def SR(*args, **kwargs):
+def build_SR(*args, solver_restart: bool = False, **kwargs):
     """
     Construct the structure holding the parameters for using the
     Stochastic Reconfiguration/Natural gradient method.
@@ -132,12 +133,23 @@ def SR(*args, **kwargs):
 
         kwargs["solver"] = solver
 
-    return _SR(*args, **kwargs)
+    return _SR(*args, solver_restart=solver_restart, **kwargs)
+
+
+class SR(LinearPreconditioner):
+    pass
 
 
 # This will become the future implementation once legacy and semi-legacy
 # bejaviour is removed
-def _SR(matrix=None, solver=None, *, diag_shift: float = 0.01, **kwargs):
+def _SR(
+    qgt=None,
+    solver=None,
+    *,
+    diag_shift: float = 0.01,
+    solver_restart: bool = False,
+    **kwargs,
+):
     """
     Construct the structure holding the parameters for using the
     Stochastic Reconfiguration/Natural gradient method.
@@ -149,6 +161,7 @@ def _SR(matrix=None, solver=None, *, diag_shift: float = 0.01, **kwargs):
     You can also construct one of those structures directly.
 
     Args:
+        qgt: The Quantum Geomtric Tensor type to use.
         diag_shift: Diagonal shift added to the S matrix
         method: (cg, gmres) The specific method.
         iterative: Whever to use an iterative method or not.
@@ -165,9 +178,11 @@ def _SR(matrix=None, solver=None, *, diag_shift: float = 0.01, **kwargs):
     if solver is None:
         solver = jax.scipy.sparse.linalg.cg
 
-    if matrix is None:
-        matrix = QGTAuto(solver)
+    if qgt is None:
+        qgt = QGTAuto(solver)
 
-    return Preconditioner(
-        object=partial(matrix, diag_shift=diag_shift, **kwargs), solver=solver
+    return SR(
+        partial(qgt, diag_shift=diag_shift, **kwargs),
+        solver=solver,
+        solver_restart=solver_restart,
     )
