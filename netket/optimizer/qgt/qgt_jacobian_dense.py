@@ -27,7 +27,7 @@ from ..linear_operator import LinearOperator, Uninitialized
 
 
 def QGTJacobianDense(
-    vstate, *, mode, rescale_shift=False, **kwargs
+    vstate, *, mode: str = "holomorphic", rescale_shift=False, **kwargs
 ) -> "QGTJacobianDenseT":
     O, scale = gradients(
         vstate._apply_fun,
@@ -254,9 +254,18 @@ def _grad_vmap_minus_mean(
     efficiently using vmap(grad),
     and subtracts their mean for each parameter, i.e., each column
     """
-    grads = jax.vmap(
-        jax.grad(fun, holomorphic=holomorphic), in_axes=(None, 0), out_axes=0
-    )(params, samples)
-    return grads - mpi.mpi_sum_jax(grads.sum(axis=0, keepdims=True))[0] / (
-        grads.shape[0] * mpi.n_nodes
-    )
+
+    if holomorphic:
+        # works for both real and complex
+        grads = jax.vmap(nkjax.grad(fun), in_axes=(None, 0), out_axes=0)(
+            params, samples
+        )
+        return grads - mpi.mpi_sum_jax(grads.sum(axis=0, keepdims=True))[0] / (
+            grads.shape[0] * mpi.n_nodes
+        )
+    else:
+        # enforce choice
+        grads = jax.vmap(jax.grad(fun), in_axes=(None, 0), out_axes=0)(params, samples)
+        return grads - mpi.mpi_sum_jax(grads.sum(axis=0, keepdims=True))[0] / (
+            grads.shape[0] * mpi.n_nodes
+        )

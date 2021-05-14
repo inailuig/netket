@@ -28,6 +28,23 @@ from .qgt_jacobian_dense import QGTJacobianDense
 from .qgt_jacobian_pytree import QGTJacobianPyTree
 from .qgt_onthefly import QGTOnTheFly
 
+from ..solver import cholesky, svd, LU, solve
+
+solvers = [cholesky, svd, LU, solve]
+
+
+def _is_dense_solver(solver: Any) -> bool:
+    """
+    Returns true if the solver is one of our known dense solvers
+    """
+    if isinstance(solver, partial):
+        solver = solver.func
+
+    if solver in solvers:
+        return True
+
+    return False
+
 
 def default_qgt_matrix(variational_state, solver=False):
     # arbitrary heuristic: for more than 2
@@ -36,9 +53,13 @@ def default_qgt_matrix(variational_state, solver=False):
     n_param_blocks = len(jax.tree_leaves(variational_state.parameters))
     n_params = variational_state.n_parameters
 
+    # those require dense matrix that is known to be faster for this qgt
+    if _is_dense_solver(solver):
+        return partial(QGTJacobianDense, mode="holomorphic")
+
     # Completely arbitrary
     if n_param_blocks > 6 and n_params > 800:
-        return QGTJacobianPyTree
+        return partial(QGTJacobianDense, mode="holomorphic")
     else:
         return QGTOnTheFly
 
