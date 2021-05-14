@@ -266,19 +266,7 @@ Optimizer
 
 .. currentmodule:: netket
 
-This module provides the following functionalities
-
-.. autosummary::
-   :toctree: _generated/optim
-   :nosignatures:
-   
-   netket.optimizer.SR
-   netket.optimizer.sr.SRLazyCG
-   netket.optimizer.sr.SRLazyGMRES
-   netket.optimizer.sr.SRJacobianCG
-   netket.optimizer.sr.SRLazyGMRES
-
-This module also provides some optimisers from `optax <https://github.com/deepmind/optax>`_. 
+This module provides some optimisers from `optax <https://github.com/deepmind/optax>`_. 
 Check it out for up-to-date informations on available optimisers.
 
 .. warning::
@@ -300,6 +288,37 @@ Check it out for up-to-date informations on available optimisers.
    netket.optimizer.Momentum
    netket.optimizer.RmsProp
 
+
+This module provides also some functionality related to Stochastic Reconfiguration
+
+.. autosummary::
+   :toctree: _generated/optim
+   :nosignatures:
+   
+   netket.optimizer.SR
+
+It also provides the following implementation of the quantum geometric tensor:
+
+.. autosummary::
+   :toctree: _generated/optim
+   :nosignatures:
+   
+   netket.optimizer.qgt.QGTAuto
+   netket.optimizer.qgt.QGTOnTheFly
+   netket.optimizer.qgt.QGTJacobianPyTree
+   netket.optimizer.qgt.QGTJacobianDense
+
+
+And the following dense solvers for Stochastic reconfiguration:
+
+.. autosummary::
+   :toctree: _generated/optim
+   :nosignatures:
+   
+   netket.optimizer.solver.svd
+   netket.optimizer.solver.cholesky
+   netket.optimizer.solver.LU
+   netket.optimizer.solver.solve
 
 .. _drivers-api:
 
