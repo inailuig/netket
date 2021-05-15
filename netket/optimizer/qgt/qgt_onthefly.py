@@ -173,4 +173,9 @@ def _to_dense(self: QGTOnTheFlyT) -> jnp.ndarray:
     """
     Npars = nkjax.tree_size(self.params)
     I = jax.numpy.eye(Npars)
-    return jax.vmap(lambda x: self @ x, in_axes=0)(I)
+    out = jax.vmap(lambda x: self @ x, in_axes=0)(I)
+
+    if nkjax.is_complex(out):
+        out = out.T
+
+    return out

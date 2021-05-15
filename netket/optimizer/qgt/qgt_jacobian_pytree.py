@@ -218,12 +218,13 @@ def _solve(
 
 @jax.jit
 def _to_dense(self: QGTJacobianPyTreeT) -> jnp.ndarray:
-    pars = self.params
+    O = jax.vmap(lambda l: nkjax.tree_ravel(l)[0])(self.O)
 
-    if self.mode != "holomorphic":
-        pars, _ = nkjax.tree_to_real(pars)
+    if self.scale is None:
+        diag = jnp.eye(O.shape[1])
+    else:
+        scale, _ = nkjax.tree_ravel(self.scale)
+        O = O * scale[jnp.newaxis, :]
+        diag = jnp.diag(scale ** 2)
 
-    Npars = nkjax.tree_size(pars)
-    I = jax.numpy.eye(Npars)
-
-    return jax.vmap(self._split_matmul, in_axes=0)(I)
+    return mpi.mpi_sum_jax(O.T.conj() @ O)[0] + self.diag_shift * diag
