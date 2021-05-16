@@ -233,8 +233,12 @@ class PyTreeArrayT:
     def astype(self, dtype_tree):
         if isinstance(dtype_tree, PyTreeArrayT):
             dtype_tree = dtype_tree.tree
-        tree = jax.tree_multimap(lambda x, y: x.astype(y.dtype), self.tree, dtype_tree)
+        tree = jax.tree_multimap(lambda x, y: x.astype(y), self.tree, dtype_tree)
         return self.replace(tree=tree)
+
+    @property
+    def dtype(self):
+        return jax.tree_map(jnp.dtype, self.tree)
 
 
 _arr_treedef = jax.tree_structure(jnp.zeros(0))  # TODO proper way to get * ??

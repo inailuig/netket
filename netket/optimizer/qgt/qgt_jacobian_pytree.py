@@ -196,7 +196,7 @@ def _matmul(
 
     # TODO MPI
     result = ((self.O @ vec).T.conj() @ self.O).T.conj()
-    result = result.astype(vec) + self.diag_shift * vec
+    result = result.astype(vec.dtype) + self.diag_shift * vec
 
     if self.scale is not None:
         result = result * self.scale
