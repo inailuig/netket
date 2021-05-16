@@ -411,16 +411,16 @@ def test_scale_invariant_regularization(e, outdtype, pardtype):
     else:
         centered_jacobian_fun = qgt_jacobian_pytree_logic.centered_jacobian_real_holo
 
-    mv = qgt_jacobian_pytree_logic._mat_vec
     centered_oks = centered_jacobian_fun(e.f, e.params, e.samples)
-    centered_oks = qgt_jacobian_pytree_logic._divide_by_sqrt_n_samp(
-        centered_oks, e.samples
-    )
+    centered_oks = pytreearray.PyTreeArray2(centered_oks)
 
-    centered_oks_scaled, scale = qgt_jacobian_pytree_logic._rescale(centered_oks)
-    actual = mv(e.v, centered_oks_scaled)
+    centered_oks = centered_oks / qgt_jacobian_pytree_logic._sqrt_n_samp(e.samples)
+    scale = qgt_jacobian_pytree_logic._scale(centered_oks)
+    centered_oks_scaled = centered_oks / scale
+    actual = centered_oks_scaled.T.conj() @ (centered_oks_scaled @ e.v)
+    actual = actual.astype(pytreearray.PyTreeArray(e.v).dtype)
     expected = reassemble_complex(e.S_real_scaled @ e.v_real_flat, target=e.target)
-    assert tree_allclose(actual, expected)
+    assert tree_allclose(actual.tree, expected)
 
 
 @pytest.mark.parametrize("holomorphic", [True])
@@ -458,14 +458,15 @@ def test_S_tree_tensor(e, jit, outdtype, pardtype, holomorphic):
         False,
         False,
     )
-    doks = pytreearray.PyTreeArray2(doks)
-    actual = nkjax.tree_cast((doks.T.conj() @ (doks @ v)).tree, v)
+    actual = doks.T.conj() @ (doks @ v)
+    actual = actual.astype(pytreearray.PyTreeArray(v).dtype)
     expected = reassemble_complex(e.S_real @ e.v_real_flat, target=e.target)
-    assert tree_allclose(reassemble(actual), expected)
+    assert tree_allclose(reassemble(actual.tree), expected)
 
     S = doks.T.conj() @ doks
-    actual2 = nkjax.tree_cast((S @ v).tree, v)
-    assert tree_allclose(reassemble(actual2), expected)
+    actual2 = S @ v
+    actual2 = actual2.astype(pytreearray.PyTreeArray(v).dtype)
+    assert tree_allclose(reassemble(actual2.tree), expected)
 
     v_dense, unravel = nkjax.tree_ravel(v)
     actual3 = unravel(S.to_dense() @ v_dense)
