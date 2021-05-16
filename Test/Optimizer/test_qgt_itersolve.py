@@ -127,9 +127,16 @@ def test_qgt_matmul(qgt, vstate, _mpi_size, _mpi_rank):
     x = S @ y
 
     # test multiplication by dense gives same result...
+
+    back = None
+    if hasattr(S, "mode") and S.mode != "holomorphic":
+        y, back = nk.jax.tree_to_real(y)
+
     y_dense, unravel = nk.jax.tree_ravel(y)
     x_dense = S @ y_dense
     x_dense_unravelled = unravel(x_dense)
+    if back is not None:
+        x_dense_unravelled = back(x_dense_unravelled)
 
     jax.tree_multimap(
         lambda a, b: np.testing.assert_allclose(a, b), x, x_dense_unravelled
