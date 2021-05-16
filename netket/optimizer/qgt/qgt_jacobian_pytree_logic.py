@@ -159,7 +159,7 @@ def _rescale(centered_oks):
 # here the other modes are converted
 
 
-@partial(jax.jit, static_argnums=(0, 4, 5))
+@partial(jax.jit, static_argnums=(0, 4, 5, 6))
 def prepare_centered_oks(
     apply_fun: Callable,
     params: PyTree,
@@ -167,6 +167,7 @@ def prepare_centered_oks(
     model_state: Optional[PyTree],
     mode: str,
     rescale_shift: bool,
+    flatten: bool,
 ) -> PyTree:
     """
     compute ΔOⱼₖ = Oⱼₖ - ⟨Oₖ⟩ = ∂/∂pₖ ln Ψ(σⱼ) - ⟨∂/∂pₖ ln Ψ⟩
@@ -233,10 +234,16 @@ def prepare_centered_oks(
     else:
         f = forward_fn
 
+    if flatten:
+        params_flat, unravel = jax.flatten_util.ravel_pytree(params)
+
+        def f_flat(params, samples):
+            return f(unravel(params), samples)
+
     centered_oks = _divide_by_sqrt_n_samp(
         centered_jacobian_fun(
-            f,
-            params,
+            f_flat if flatten else f,
+            params_flat if flatten else params,
             samples,
         ),
         samples,
