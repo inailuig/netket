@@ -7,7 +7,11 @@ import jax.numpy as jnp
 import jax.flatten_util
 import numpy as np
 from jax.scipy.sparse.linalg import cg
-from netket.optimizer.qgt import qgt_onthefly_logic, qgt_jacobian_pytree_logic
+from netket.optimizer.qgt import (
+    qgt_onthefly_logic,
+    qgt_jacobian_pytree_logic,
+    pytreearray,
+)
 
 from functools import partial
 import itertools
@@ -16,7 +20,8 @@ from netket import jax as nkjax
 
 import pytest
 
-from .. import common
+# from .. import common
+import common
 
 pytestmark = common.skipif_mpi
 
@@ -416,6 +421,49 @@ def test_scale_invariant_regularization(e, outdtype, pardtype):
     actual = mv(e.v, centered_oks_scaled)
     expected = reassemble_complex(e.S_real_scaled @ e.v_real_flat, target=e.target)
     assert tree_allclose(actual, expected)
+
+
+@pytest.mark.parametrize("holomorphic", [True])
+@pytest.mark.parametrize("n_samp", [25, 1024])
+@pytest.mark.parametrize("jit", [True, False])
+@pytest.mark.parametrize(
+    "outdtype, pardtype", r_r_test_types + r_c_test_types + c_c_test_types
+)
+def test_S_tree_tensor(e, jit, outdtype, pardtype, holomorphic):
+    def f(p, x):
+        return e.f(p["params"], x)
+
+    homogeneous = pardtype is not None
+
+    if not nkjax.is_complex_dtype(outdtype):
+        mode = "real"
+    elif homogeneous and nkjax.is_complex_dtype(pardtype) and holomorphic:
+        mode = "holomorphic"
+    else:
+        mode = "complex"
+
+    if mode == "holomorphic":
+        v = e.v
+        reassemble = lambda x: x
+    else:
+        # doesn't actually do anything since we are not testing non-holomorphic and non-homogeneous
+        v, reassemble = nkjax.tree_to_real(e.v)
+
+    doks, _ = qgt_jacobian_pytree_logic.prepare_centered_oks(
+        f, e.params, e.samples, {}, mode, False
+    )
+    doks = pytreearray.PyTreeArray2(doks)
+    actual = nkjax.tree_cast((doks.T.conj() @ (doks @ v)).tree, v)
+    expected = reassemble_complex(e.S_real @ e.v_real_flat, target=e.target)
+    assert tree_allclose(reassemble(actual), expected)
+
+    S = doks.T.conj() @ doks
+    actual2 = nkjax.tree_cast((S @ v).tree, v)
+    assert tree_allclose(reassemble(actual2), expected)
+
+    v_dense, unravel = nkjax.tree_ravel(v)
+    actual3 = unravel(S.to_dense() @ v_dense)
+    assert tree_allclose(reassemble(actual3), expected)
 
 
 # TODO test with MPI
