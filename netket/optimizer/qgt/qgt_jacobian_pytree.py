@@ -85,7 +85,14 @@ class QGTJacobianPyTreeT(LinearOperator):
     """Parameters of the network. Its only purpose is to represent its own shape when scale is None"""
 
     mode: str = struct.field(pytree_node=False, default=Uninitialized)
-    """Differentiation mode, "auto" is resolved into "real" or "complex" """
+    """Differentiation mode:
+        - "real": for real-valued R->R and C->R ansatze, splits the complex inputs
+                  into real and imaginary part.
+        - "complex": for complex-valued R->C and C->C ansatze, splits the complex
+                  inputs and outputs into real and imaginary part
+        - "holomorphic": for any ansatze. Does not split complex values.
+        - "auto": autoselect real or complex.
+    """
 
     _in_solve: bool = struct.field(pytree_node=False, default=False)
     """Internal flag used to signal that we are inside the _solve method and matmul should
@@ -93,9 +100,6 @@ class QGTJacobianPyTreeT(LinearOperator):
 
     def __matmul__(self, vec: Union[PyTree, Array]) -> Union[PyTree, Array]:
         return _matmul(self, vec)
-
-    def _split_matmul(self, vec: Array) -> Array:
-        return _split_matmul(self, vec)
 
     def _solve(self, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None) -> PyTree:
         """
@@ -161,27 +165,6 @@ def _matmul(
     if ravel:
         result, _ = nkjax.tree_ravel(result)
 
-    return result
-
-
-@jax.jit
-def _split_matmul(self: QGTJacobianPyTreeT, vec: Array) -> Array:
-    pars = self.params
-    if self.mode != "holomorphic":
-        pars, _ = nkjax.tree_to_real(pars)
-
-    _, unravel = nkjax.tree_ravel(pars)
-    vec = unravel(vec)
-
-    if self.scale is not None:
-        vec = jax.tree_multimap(jnp.multiply, vec, self.scale)
-
-    result = mat_vec(vec, self.O, self.diag_shift)
-
-    if self.scale is not None:
-        result = jax.tree_multimap(jnp.multiply, result, self.scale)
-
-    result, _ = nkjax.tree_ravel(result)
     return result
 
 
