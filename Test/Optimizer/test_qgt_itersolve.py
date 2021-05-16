@@ -33,7 +33,7 @@ QGT_objects["JacobianPyTree(rescale_shift=True)"] = partial(
     qgt.QGTJacobianPyTree, mode="auto", rescale_shift=True, diag_shift=0.01
 )
 QGT_objects["JacobianDense"] = partial(
-    qgt.QGTJacobianPyTree, mode="auto", diag_shift=0.01
+    qgt.QGTJacobianDense, mode="auto", diag_shift=0.01
 )
 QGT_objects["JacobianDense(mode=holomorphic)"] = partial(
     qgt.QGTJacobianDense, mode="holomorphic", diag_shift=0.01
