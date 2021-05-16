@@ -163,7 +163,7 @@ def test_qgt_dense(qgt, vstate, _mpi_size, _mpi_rank):
 
     assert Sd.ndim == 2
     if hasattr(S, "mode"):
-        if S.mode is "complex":
+        if S.mode == "complex":
             assert Sd.shape == (2 * vstate.n_parameters, 2 * vstate.n_parameters)
         else:
             assert Sd.shape == (vstate.n_parameters, vstate.n_parameters)
