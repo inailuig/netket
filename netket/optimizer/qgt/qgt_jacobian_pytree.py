@@ -131,10 +131,11 @@ class QGTJacobianPyTreeT(LinearOperator):
             A dense matrix representation of this S matrix.
             In R→R and R→C modes, real and imaginary parts of parameters get own rows/columns
         """
-        # TODO jit both together?
+        # TODO take real for real params
         return _to_dense(self)
 
     def _to_matrix(self):
+        # TODO take real for real params
         return _to_mat(self)
 
     def to_matrix(self):
