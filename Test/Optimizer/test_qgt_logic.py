@@ -390,7 +390,7 @@ def test_matvec_treemv_modes(e, jit, holomorphic, pardtype, outdtype):
         mv = jax.jit(mv)
 
     centered_oks, _ = qgt_jacobian_pytree_logic.prepare_centered_oks(
-        apply_fun, e.params, e.samples, model_state, mode, rescale_shift
+        apply_fun, e.params, e.samples, model_state, mode, rescale_shift, False
     )
     actual = reassemble(mv(v, centered_oks, diag_shift))
     expected = reassemble_complex(
@@ -450,7 +450,13 @@ def test_S_tree_tensor(e, jit, outdtype, pardtype, holomorphic):
         v, reassemble = nkjax.tree_to_real(e.v)
 
     doks, _ = qgt_jacobian_pytree_logic.prepare_centered_oks(
-        f, e.params, e.samples, {}, mode, False
+        f,
+        e.params,
+        e.samples,
+        {},
+        mode,
+        False,
+        False,
     )
     doks = pytreearray.PyTreeArray2(doks)
     actual = nkjax.tree_cast((doks.T.conj() @ (doks @ v)).tree, v)
