@@ -179,7 +179,10 @@ def _matmul(
             vec, ravel_or_unravel = nkjax.tree_ravel(vec)
     else:
         if hasattr(vec, "ndim"):
-            _, unravel = nkjax.tree_ravel(self.params)
+            p = self.params
+            if reassemble is not None:
+                p, _ = nkjax.tree_to_real(p)
+            _, unravel = nkjax.tree_ravel(p)
             vec = unravel(vec)
             ravel_or_unravel = lambda x: nkjax.tree_ravel(x)[0]
 
