@@ -151,6 +151,7 @@ class QGTJacobianMatrixT(LinearOperator):
         return _matmul2(self.S, v)
 
     def __add__(self, eps):
+        # TODO jit
         return self.replace(S=S.add_diag_scalar(eps), diag_shift=self.diag_shift + eps)
 
     def to_dense(self):
@@ -168,6 +169,11 @@ class QGTJacobianMatrixT(LinearOperator):
 def _matmul(
     self: QGTJacobianPyTreeT, vec: Union[PyTree, Array]
 ) -> Union[PyTree, Array]:
+
+    toPyTreeArray = False
+    if isinstance(vec, PyTreeArrayT):
+        vec = vec.tree
+        toPyTreeArray = True
 
     # Real-imaginary split RHS in R→R and R→C modes
     reassemble = None
@@ -211,6 +217,8 @@ def _matmul(
     if reassemble is not None:
         result = reassemble(result)
 
+    if toPyTreeArray:
+        result = PyTreeArray(result)
     return result
 
 
@@ -246,14 +254,7 @@ def _solve(
     # mode=holomoprhic to disable splitting the complex part
     unscaled_self = self.replace(scale=None, _in_solve=True)
 
-    # end PyTreeArray
-    # TODO make it work with the solvers, like FrozenDict does; why doesnt pytree_node=False work???
-    y = y.tree
-    if x0 is not None:
-        x0 = x0.tree
     out, info = solve_fun(unscaled_self, y, x0=x0)
-    out = PyTreeArray(out)
-    # begin PyTreeArray
 
     if self.scale is not None:
         out = out / self.scale
@@ -289,7 +290,7 @@ def _to_dense(self):
 @jax.jit
 def _matmul2(S, v):
     # TODO MPI
-    return (S @ v).tree
+    return S @ v
 
 
 @jax.jit

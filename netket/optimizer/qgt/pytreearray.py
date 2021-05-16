@@ -240,6 +240,10 @@ class PyTreeArrayT:
     def dtype(self):
         return jax.tree_map(jnp.dtype, self.tree)
 
+    # for the iterative solvers
+    def __call__(self, vec):
+        return self @ vec
+
 
 _arr_treedef = jax.tree_structure(jnp.zeros(0))  # TODO proper way to get * ??
 
@@ -272,4 +276,3 @@ def tree_allclose(t1, t2):
 # TODO eye_like / lazy add to diagonal
 # TODO ignore flax FrozenDict in treedef comparison
 # TODO ndim attr if treedefs are both * to emulate array
-# TODO make it work with the solvers, like FrozenDict does; why doesnt pytree_node=False work???
