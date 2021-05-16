@@ -154,30 +154,6 @@ def _rescale(centered_oks):
     return centered_oks, scale
 
 
-def _jvp(oks: PyTree, v: PyTree) -> Array:
-    """
-    Compute the matrix-vector product between the pytree jacobian oks and the pytree vector v
-    """
-    td = lambda x, y: jnp.tensordot(x, y, axes=y.ndim)
-    return jax.tree_util.tree_reduce(jnp.add, jax.tree_multimap(td, oks, v))
-
-
-def _vjp(oks: PyTree, w: Array) -> PyTree:
-    """
-    Compute the vector-matrix product between the vector w and the pytree jacobian oks
-    """
-    res = jax.tree_map(partial(jnp.tensordot, w, axes=1), oks)
-    return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # MPI
-
-
-def _mat_vec(v: PyTree, oks: PyTree) -> PyTree:
-    """
-    Compute ⟨O† O⟩v = ∑ₗ ⟨Oₖᴴ Oₗ⟩ vₗ
-    """
-    res = tree_conj(_vjp(oks, _jvp(oks, v).conjugate()))
-    return tree_cast(res, v)
-
-
 # ==============================================================================
 # the logic above only works for R→R, R→C and holomorphic C→C
 # here the other modes are converted
@@ -269,21 +245,3 @@ def prepare_centered_oks(
         return _rescale(centered_oks)
     else:
         return centered_oks, None
-
-
-def mat_vec(v: PyTree, centered_oks: PyTree, diag_shift: Scalar) -> PyTree:
-    """
-    Compute (S + δ) v = 1/n ⟨ΔO† ΔO⟩v + δ v = ∑ₗ 1/n ⟨ΔOₖᴴΔOₗ⟩ vₗ + δ vₗ
-
-    Only compatible with R→R, R→C, and holomorphic C→C
-    for C→R, R&C→R, R&C→C and general C→C the parameters for generating ΔOⱼₖ should be converted to R,
-    and thus also the v passed to this function as well as the output are expected to be of this form
-
-    Args:
-        v: pytree representing the vector v compatible with centered_oks
-        centered_oks: pytree of gradients 1/√n ΔOⱼₖ
-        diag_shift: a scalar diagonal shift δ
-    Returns:
-        a pytree corresponding to the sr matrix-vector product (S + δ) v
-    """
-    return tree_axpy(diag_shift, v, _mat_vec(v, centered_oks))

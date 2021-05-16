@@ -26,7 +26,9 @@ import netket.jax as nkjax
 
 from ..linear_operator import LinearOperator, Uninitialized
 
-from .qgt_jacobian_pytree_logic import mat_vec, prepare_centered_oks
+from .qgt_jacobian_pytree_logic import prepare_centered_oks
+
+from .pytreearray import *
 
 
 def QGTJacobianPyTree(
@@ -60,8 +62,10 @@ def QGTJacobianPyTree(
         rescale_shift,
     )
 
+    O = PyTreeArray2(O)
+
     return QGTJacobianPyTreeT(
-        O=O, scale=scale, params=vstate.parameters, mode=mode, **kwargs
+        O=O, scale=scale, params=vstate.parameters, mode=mode, flatten=flatten, **kwargs
     )
 
 
@@ -101,6 +105,8 @@ class QGTJacobianPyTreeT(LinearOperator):
         - "auto": autoselect real or complex.
     """
 
+    flatten: bool = struct.field(pytree_node=False, default=False)
+
     _in_solve: bool = struct.field(pytree_node=False, default=False)
     """Internal flag used to signal that we are inside the _solve method and matmul should
     not take apart into real and complex parts the other vector"""
@@ -133,6 +139,10 @@ class QGTJacobianPyTreeT(LinearOperator):
         """
         return _to_dense(self)
 
+    def to_matrix(self) -> PyTree:
+        # TODO diag_shift
+        return _to_matrix(self)
+
 
 ########################################################################################
 #####                                  QGT Logic                                   #####
@@ -144,12 +154,22 @@ def _matmul(
     self: QGTJacobianPyTreeT, vec: Union[PyTree, Array]
 ) -> Union[PyTree, Array]:
     # Turn vector RHS into PyTree
-    if hasattr(vec, "ndim"):
-        _, unravel = nkjax.tree_ravel(self.params)
-        vec = unravel(vec)
-        ravel = True
+
+    if self.flatten:
+        do_ravel = False
+        if not hasattr(vec, "ndim"):
+            vec, unravel = nkjax.tree_ravel(self.params)
+            do_unravel = True
+        else:
+            do_unravel = False
     else:
-        ravel = False
+        do_unravel = False
+        if hasattr(vec, "ndim"):
+            _, unravel = nkjax.tree_ravel(self.params)
+            vec = unravel(vec)
+            do_ravel = True
+        else:
+            do_ravel = False
 
     # Real-imaginary split RHS in R→R and R→C modes
     reassemble = None
@@ -159,7 +179,11 @@ def _matmul(
     if self.scale is not None:
         vec = jax.tree_multimap(jnp.multiply, vec, self.scale)
 
-    result = mat_vec(vec, self.O, self.diag_shift)
+    if not isinstance(vec, PyTreeArrayT):
+        vec = PyTreeArray(vec)
+
+    result = nkjax.tree_cast(((self.O @ vec).H @ self.O).H, vec) + self.diag_shift * vec
+    result = result.tree  # remove PyTreeArrayT wrapper for now
 
     if self.scale is not None:
         result = jax.tree_multimap(jnp.multiply, result, self.scale)
@@ -169,9 +193,10 @@ def _matmul(
         result = reassemble(result)
 
     # Ravel PyTree back into vector as needed
-    if ravel:
+    if do_ravel:
         result, _ = nkjax.tree_ravel(result)
-
+    if do_unravel:
+        result = unravel(result)
     return result
 
 
@@ -207,14 +232,12 @@ def _solve(
 
 
 @jax.jit
+def _to_matrix(self: QGTJacobianPyTreeT) -> PyTree:
+    # TODO MPI
+    return self.O.T.conj() @ self.O
+
+
+@jax.jit
 def _to_dense(self: QGTJacobianPyTreeT) -> jnp.ndarray:
-    O = jax.vmap(lambda l: nkjax.tree_ravel(l)[0])(self.O)
-
-    if self.scale is None:
-        diag = jnp.eye(O.shape[1])
-    else:
-        scale, _ = nkjax.tree_ravel(self.scale)
-        O = O * scale[jnp.newaxis, :]
-        diag = jnp.diag(scale ** 2)
-
-    return mpi.mpi_sum_jax(O.T.conj() @ O)[0] + self.diag_shift * diag
+    # TODO MPI
+    return self.to_matrix().to_dense()
