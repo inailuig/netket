@@ -54,7 +54,7 @@ class PyTreeArrayT:
             return self + t.tree
         else:  # PyTree
             assert jax.tree_structure(self.tree) == jax.tree_structure(t)
-            res = jax.tree_multimap(jax.lax.add, self.tree, t)
+            res = jax.tree_multimap(jnp.add, self.tree, t)
             return self.replace(tree=res)
 
     def __rmul__(self, t):
@@ -77,10 +77,21 @@ class PyTreeArrayT:
             return self._elementwise(lambda x: x * t)
         elif isinstance(t, PyTreeArrayT):
             # TODO check equal treedef_l and treedef_r, axes
-            return self + t.tree
+            return self * t.tree
         else:  # PyTree
             assert jax.tree_structure(self.tree) == jax.tree_structure(t)
-            res = jax.tree_multimap(jax.lax.mul, self.tree, t)
+            res = jax.tree_multimap(jnp.multiply, self.tree, t)
+            return self.replace(tree=res)
+
+    def __truediv__(self, t: PyTree):
+        if jnp.isscalar(t):
+            return self._elementwise(lambda x: x / t)
+        elif isinstance(t, PyTreeArrayT):
+            # TODO check equal treedef_l and treedef_r, axes
+            return self / t.tree
+        else:  # PyTree
+            assert jax.tree_structure(self.tree) == jax.tree_structure(t)
+            res = jax.tree_multimap(jnp.divide, self.tree, t)
             return self.replace(tree=res)
 
     def __sub__(self, t: PyTree):
@@ -90,7 +101,7 @@ class PyTreeArrayT:
             return self - t.tree
         else:  # PyTree
             assert jax.tree_structure(self.tree) == jax.tree_structure(t)
-            res = jax.tree_multimap(jax.lax.sub, self.tree, t)
+            res = jax.tree_multimap(jnp.subtract, self.tree, t)
             return self.replace(tree=res)
 
     def __pow__(self, t):
@@ -132,11 +143,11 @@ class PyTreeArrayT:
 
     @property
     def imag(self):
-        return self._elementwise(jax.lax.imag)
+        return self._elementwise(jnp.imag)
 
     @property
     def real(self):
-        return self._elementwise(jax.lax.real)
+        return self._elementwise(jnp.real)
 
     @property
     def H(self):
@@ -208,6 +219,23 @@ class PyTreeArrayT:
         tree = _tree_map_diag(partial(_add_diag_tensor, a=a), self.tree, _is_diag)
         return self.replace(tree=tree)
 
+    def sum(self, axis=0, keepdims=None):
+        # for vectors only for now
+        assert self.treedef_l == _arr_treedef
+        tree = jax.tree_map(partial(jnp.sum, axis=axis, keepdims=keepdims), self.tree)
+        if keepdims:
+            n_ax = 0
+        else:
+            n_ax = 1 if isinstance(axis, int) else len(axis)
+        axes_l = self.axes_l - n_ax
+        return self.replace(tree=tree, axes_l=axes_l)
+
+    def astype(self, dtype_tree):
+        if isinstance(dtype_tree, PyTreeArrayT):
+            dtype_tree = dtype_tree.tree
+        tree = jax.tree_multimap(lambda x, y: x.astype(y.dtype), self.tree, dtype_tree)
+        return self.replace(tree=tree)
+
 
 _arr_treedef = jax.tree_structure(jnp.zeros(0))  # TODO proper way to get * ??
 
@@ -240,3 +268,4 @@ def tree_allclose(t1, t2):
 # TODO eye_like / lazy add to diagonal
 # TODO ignore flax FrozenDict in treedef comparison
 # TODO ndim attr if treedefs are both * to emulate array
+# TODO make it work with the solvers, like FrozenDict does; why doesnt pytree_node=False work???

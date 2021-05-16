@@ -56,8 +56,6 @@ def QGTJacobianPyTree(
         flatten,
     )
 
-    O = PyTreeArray2(O)
-
     return QGTJacobianPyTreeT(
         O=O, scale=scale, params=vstate.parameters, mode=mode, flatten=flatten, **kwargs
     )
@@ -147,6 +145,8 @@ class QGTJacobianPyTreeT(LinearOperator):
 class QGTJacobianMatrixT(LinearOperator):
     S: PyTree = Uninitialized
 
+    # TODO scale-invariant-regularization
+
     def __matmul__(self, v):
         return _matmul2(self.S, v)
 
@@ -187,19 +187,23 @@ def _matmul(
             vec = unravel(vec)
             ravel_or_unravel = lambda x: nkjax.tree_ravel(x)[0]
 
-    if self.scale is not None:
-        vec = jax.tree_multimap(jnp.multiply, vec, self.scale)
+    # +++++++++++++++++++++++++++++
+    vec = PyTreeArray(vec)
+    # begin PyTreeArray
 
-    # if not isinstance(vec, PyTreeArrayT):
-    #    vec = PyTreeArray(vec)
+    if self.scale is not None:
+        vec = vec * self.scale
 
     # TODO MPI
-    # TODO simplify
     result = ((self.O @ vec).T.conj() @ self.O).T.conj()
-    result = nkjax.tree_axpy(self.diag_shift, vec, nkjax.tree_cast(result.tree, vec))
+    result = result.astype(vec) + self.diag_shift * vec
 
     if self.scale is not None:
-        result = jax.tree_multimap(jnp.multiply, result, self.scale)
+        result = result * self.scale
+
+    # end PyTreeArray
+    result = result.tree
+    # +++++++++++++++++++++++++++++
 
     if ravel_or_unravel is not None:
         result = ravel_or_unravel(result)
@@ -225,10 +229,16 @@ def _solve(
     else:
         unravel = None
 
+    # +++++++++++++++++++++++++++++
+    y = PyTreeArray(y)
+    if x0 is not None:
+        x0 = PyTreeArray(x0)
+    # begin PyTreeArray
+
     if self.scale is not None:
-        y = jax.tree_multimap(jnp.divide, y, self.scale)
+        y = y / self.scale
         if x0 is not None:
-            x0 = jax.tree_multimap(jnp.multiply, x0, self.scale)
+            x0 = x0 * self.scale
 
     # to pass the object LinearOperator itself down
     # but avoid rescaling, we pass down an object with
@@ -236,10 +246,21 @@ def _solve(
     # mode=holomoprhic to disable splitting the complex part
     unscaled_self = self.replace(scale=None, _in_solve=True)
 
+    # end PyTreeArray
+    # TODO make it work with the solvers, like FrozenDict does; why doesnt pytree_node=False work???
+    y = y.tree
+    if x0 is not None:
+        x0 = x0.tree
     out, info = solve_fun(unscaled_self, y, x0=x0)
+    out = PyTreeArray(out)
+    # begin PyTreeArray
 
     if self.scale is not None:
-        out = jax.tree_multimap(jnp.divide, out, self.scale)
+        out = out / self.scale
+
+    # end PyTreeArray
+    out = out.tree
+    # +++++++++++++++++++++++++++++
 
     if unravel is not None:
         out = unravel(out)

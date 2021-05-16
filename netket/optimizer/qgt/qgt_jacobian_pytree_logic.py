@@ -33,6 +33,7 @@ from netket.utils.types import Array, Callable, PyTree, Scalar
 import netket.jax as nkjax
 from netket.jax import tree_cast, tree_conj, tree_axpy, tree_to_real
 
+from .pytreearray import *
 
 # TODO better name and move it somewhere sensible
 def single_sample(forward_fn):
@@ -104,12 +105,9 @@ centered_jacobian_real_holo = compose(tree_subtract_mean, jacobian_real_holo)
 centered_jacobian_cplx = compose(tree_subtract_mean, jacobian_cplx)
 
 
-def _divide_by_sqrt_n_samp(oks, samples):
-    """
-    divide Oⱼₖ by √n
-    """
+def _sqrt_n_samp(samples):
     n_samp = samples.shape[0] * mpi.n_nodes  # MPI
-    return jax.tree_map(lambda x: x / np.sqrt(n_samp), oks)
+    return np.sqrt(n_samp)
 
 
 def stack_jacobian(centered_oks: PyTree) -> PyTree:
@@ -136,22 +134,15 @@ def stack_jacobian_tuple(centered_oks_re_im):
     )
 
 
-def _rescale(centered_oks):
+def _scale(centered_oks: PyTreeArrayT):
     """
-    compute ΔOₖ/√Sₖₖ and √Sₖₖ
+    compute √Sₖₖ
     to do scale-invariant regularization (Becca & Sorella 2017, pp. 143)
     Sₖₗ/(√Sₖₖ√Sₗₗ) = ΔOₖᴴΔOₗ/(√Sₖₖ√Sₗₗ) = (ΔOₖ/√Sₖₖ)ᴴ(ΔOₗ/√Sₗₗ)
     """
-    scale = jax.tree_map(
-        lambda x: mpi.mpi_sum_jax(jnp.sum((x * x.conj()).real, axis=0, keepdims=True))[
-            0
-        ]
-        ** 0.5,
-        centered_oks,
-    )
-    centered_oks = jax.tree_multimap(jnp.divide, centered_oks, scale)
-    scale = jax.tree_map(partial(jnp.squeeze, axis=0), scale)
-    return centered_oks, scale
+    O = centered_oks
+    scale = (O * O.conj()).real.sum(axis=0) ** 0.5
+    return scale
 
 
 # ==============================================================================
@@ -240,15 +231,16 @@ def prepare_centered_oks(
         def f_flat(params, samples):
             return f(unravel(params), samples)
 
-    centered_oks = _divide_by_sqrt_n_samp(
-        centered_jacobian_fun(
-            f_flat if flatten else f,
-            params_flat if flatten else params,
-            samples,
-        ),
+    centered_oks = centered_jacobian_fun(
+        f_flat if flatten else f,
+        params_flat if flatten else params,
         samples,
     )
+    # starting from here we use PyTreeArray
+    centered_oks = PyTreeArray2(centered_oks) / _sqrt_n_samp(samples)
+
     if rescale_shift:
-        return _rescale(centered_oks)
+        scale = _scale(centered_oks)
+        return centered_oks / scale, scale
     else:
         return centered_oks, None
