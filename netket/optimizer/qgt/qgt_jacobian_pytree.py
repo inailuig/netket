@@ -137,11 +137,31 @@ class QGTJacobianPyTreeT(LinearOperator):
             A dense matrix representation of this S matrix.
             In R→R and R→C modes, real and imaginary parts of parameters get own rows/columns
         """
+        # TODO jit both together?
         return _to_dense(self)
 
-    def to_matrix(self) -> PyTree:
-        # TODO diag_shift
-        return _to_matrix(self)
+    def _to_matrix(self):
+        return _to_mat(self)
+
+    def to_matrix(self):
+        return QGTJacobianMatrixT(self.diag_shift, self._to_matrix())
+
+
+# TODO name?
+@struct.dataclass
+class QGTJacobianMatrixT(LinearOperator):
+    S: PyTree = Uninitialized
+
+    def __matmul__(self, v):
+        return _matmul2(self.S, v)
+
+    def __add__(self, eps):
+        return self.replace(S=S.add_diag_scalar(eps), diag_shift=self.diag_shift + eps)
+
+    def to_dense(self):
+        return _to_dense2(self.S)
+
+    # TODO custom replace for diag_shift
 
 
 ########################################################################################
@@ -179,11 +199,13 @@ def _matmul(
     if self.scale is not None:
         vec = jax.tree_multimap(jnp.multiply, vec, self.scale)
 
-    if not isinstance(vec, PyTreeArrayT):
-        vec = PyTreeArray(vec)
+    # if not isinstance(vec, PyTreeArrayT):
+    #    vec = PyTreeArray(vec)
 
-    result = nkjax.tree_cast(((self.O @ vec).H @ self.O).H, vec) + self.diag_shift * vec
-    result = result.tree  # remove PyTreeArrayT wrapper for now
+    # TODO MPI
+    # TODO simplify
+    result = ((self.O @ vec).T.conj() @ self.O).T.conj()
+    result = nkjax.tree_axpy(self.diag_shift, vec, nkjax.tree_cast(result.tree, vec))
 
     if self.scale is not None:
         result = jax.tree_multimap(jnp.multiply, result, self.scale)
@@ -224,6 +246,9 @@ def _solve(
     if self.scale is not None:
         out = jax.tree_multimap(jnp.divide, out, self.scale)
 
+    if unravel is not None:
+        out = unravel(out)
+
     # Reassemble real-imaginary split as needed
     if self.mode != "holomorphic":
         out = reassemble(out)
@@ -232,12 +257,26 @@ def _solve(
 
 
 @jax.jit
-def _to_matrix(self: QGTJacobianPyTreeT) -> PyTree:
+def _to_mat(self):
     # TODO MPI
-    return self.O.T.conj() @ self.O
+    S = self.O.T.conj() @ self.O
+    return S.add_diag_scalar(self.diag_shift)
 
 
 @jax.jit
-def _to_dense(self: QGTJacobianPyTreeT) -> jnp.ndarray:
+def _to_dense(self):
     # TODO MPI
-    return self.to_matrix().to_dense()
+    res = self._to_matrix().to_dense()
+    return res
+
+
+@jax.jit
+def _matmul2(S, v):
+    # TODO MPI
+    return (S @ v).tree
+
+
+@jax.jit
+def _to_dense2(S):
+    # TODO MPI
+    return S.to_dense()

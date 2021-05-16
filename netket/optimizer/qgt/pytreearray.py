@@ -7,6 +7,8 @@ from typing import Any, Sequence, Callable, Collection, Union
 from functools import reduce
 from operator import mul
 
+import math
+
 PyTree = Any
 # Scalar = Union[float, int, complex]
 
@@ -140,20 +142,6 @@ class PyTreeArrayT:
     def H(self):
         return self.T.conj()
 
-    def to_dense(self):
-        # only summetric for now
-        # TODO generic
-        symmetric = True
-        if symmetric:
-            assert self.treedef_l == self.treedef_r
-            assert tree_allclose(self.axes_l, self.axes_r)
-            # TODO check tensor shapes are symmetric as well
-            x, _ = jax.flatten_util.ravel_pytree(self.tree)
-            n = len(x)
-            sqrtn = int(np.sqrt(n))
-            assert sqrtn ** 2 == n
-            return x.reshape((sqrtn, sqrtn))
-
     def _l_map(self, f):
         return jax.tree_map(
             f, self.tree, is_leaf=lambda x: jax.tree_structure(x) == self.treedef_r
@@ -191,6 +179,34 @@ class PyTreeArrayT:
             lambda x: jax.flatten_util.ravel_pytree(x)[0], in_axes=1, out_axes=1
         )(tree_dense_r)
         return tree_dense_lr
+
+    def add_diag_scalar(self, a):
+        assert self.treedef_l == self.treedef_r
+        nl = self.treedef_l.num_leaves
+
+        def _is_diag(i):
+            return i % (nl + 1) == 0
+
+        def _tree_map_diag(f, tree, is_diag):
+            leaves, treedef = jax.tree_flatten(tree)
+            return treedef.unflatten(
+                f(l) if is_diag(i) else l for i, l in enumerate(leaves)
+            )
+
+        def _add_diag_tensor(x, a):
+            # TODO simpler ?
+            s = x.shape
+            n = x.ndim
+            assert n % 2 == 0
+            assert s[: n // 2] == s[n // 2 :]
+            sl = s[: n // 2]
+            _prod = lambda x: reduce(mul, x, 1)
+            il = jnp.unravel_index(jnp.arange(_prod(sl)), sl)
+            i = il + il
+            return jax.ops.index_add(x, i, a)
+
+        tree = _tree_map_diag(partial(_add_diag_tensor, a=a), self.tree, _is_diag)
+        return self.replace(tree=tree)
 
 
 _arr_treedef = jax.tree_structure(jnp.zeros(0))  # TODO proper way to get * ??
