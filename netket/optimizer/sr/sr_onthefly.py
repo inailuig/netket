@@ -24,7 +24,8 @@ from netket.utils.types import PyTree, Array
 from netket.utils import rename_class
 import netket.jax as nkjax
 
-from .sr_onthefly_logic import mat_vec as mat_vec_onthefly, tree_cast
+from .sr_onthefly_logic import mat_vec as mat_vec_onthefly
+from netket.jax import tree_cast
 
 from .base import SR
 

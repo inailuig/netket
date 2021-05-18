@@ -18,7 +18,7 @@ from functools import partial
 from netket.stats import subtract_mean
 from netket.utils.mpi import n_nodes, mpi_sum_jax
 import netket.jax as nkjax
-from netket.jax import tree_conj, tree_dot, tree_cast, tree_axpy
+from netket.jax import tree_conj, tree_dot, tree_axpy
 
 # Stochastic Reconfiguration with jvp and vjp
 
@@ -86,11 +86,7 @@ def OH_w(forward_fn, params, samples, w):
     # The transposition of the 1D arrays is omitted in the implementation:
     # (w^H O)^H -> (w* O)*
 
-    # TODO The allreduce in O_vjp could be deferred until after the tree_cast
-    # where the amount of data to be transferred would potentially be smaller
-    res = tree_conj(O_vjp(forward_fn, params, samples, w.conjugate()))
-
-    return tree_cast(res, params)
+    return tree_conj(O_vjp(forward_fn, params, samples, w.conjugate()))
 
 
 def Odagger_O_v(forward_fn, params, samples, v, *, center=False):

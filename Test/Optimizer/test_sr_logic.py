@@ -11,6 +11,8 @@ from netket.optimizer.sr import sr_onthefly_logic, sr_treemv_logic
 from functools import partial
 import itertools
 
+from netket.jax import tree_cast
+
 import pytest
 
 from .. import common
@@ -50,7 +52,7 @@ def reassemble_complex(x, target, fun=tree_toreal_flat):
     (res,) = jax.linear_transpose(fun, target)(x)
     res = sr_onthefly_logic.tree_conj(res)
     # fix the dtypes:
-    return sr_onthefly_logic.tree_cast(res, target)
+    return tree_cast(res, target)
 
 
 def tree_allclose(t1, t2):
