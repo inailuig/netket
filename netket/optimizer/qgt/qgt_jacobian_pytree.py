@@ -231,17 +231,22 @@ def _solve(
 @jax.jit
 def _to_dense(self: QGTJacobianPyTreeT) -> jnp.ndarray:
 
-    # C->C and RC->C
-    # impossible since one would need 4 real numbers
-    # TODO convert to real ?
-    # assert self.mode != 'complex'
+    O = self.O
+    if self.mode == "complex":
+        Or, Oi = O
+        Or, _ = nkjax.tree_to_real(Or)
+        Oi, _ = nkjax.tree_to_real(Oi)
+        O = jax.tree_multimap(jax.lax.complex, Or, Oi)
 
-    O = jax.vmap(lambda l: nkjax.tree_ravel(l)[0])(self.O)
+    O = jax.vmap(lambda l: nkjax.tree_ravel(l)[0])(O)
 
     if self.scale is None:
         diag = jnp.eye(O.shape[1])
     else:
-        scale, _ = nkjax.tree_ravel(self.scale)
+        scale = self.scale
+        if self.mode == "complex":
+            scale, _ = nkjax.tree_to_real(scale)
+        scale, _ = nkjax.tree_ravel(scale)
         O = O * scale[jnp.newaxis, :]
         diag = jnp.diag(scale ** 2)
 
