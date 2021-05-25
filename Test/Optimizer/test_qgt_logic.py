@@ -325,20 +325,25 @@ def test_matvec_linear_transpose(e, centered, jit):
 
 
 # TODO separate test for prepare_centered_oks
-@pytest.mark.parametrize("holomorphic", [True])
+@pytest.mark.parametrize("holomorphic", [True, False])
 @pytest.mark.parametrize("n_samp", [25, 1024])
 @pytest.mark.parametrize("jit", [True, False])
-@pytest.mark.parametrize(
-    "outdtype, pardtype", r_r_test_types + c_c_test_types + r_c_test_types
-)
+@pytest.mark.parametrize("outdtype, pardtype", test_types)
 def test_matvec_treemv(e, jit, holomorphic, pardtype, outdtype):
     diag_shift = 0.01
-    mv = qgt_jacobian_pytree_logic._mat_vec
 
-    if not nkjax.is_complex_dtype(pardtype) and nkjax.is_complex_dtype(outdtype):
-        centered_jacobian_fun = qgt_jacobian_pytree_logic.centered_jacobian_cplx
-    else:
+    real_par = not nkjax.is_complex_dtype(pardtype)
+    complex_out = nkjax.is_complex_dtype(outdtype)
+    homogeneous = pardtype is not None
+
+    if (not nkjax.is_complex_dtype(outdtype)) or (
+        homogeneous and nkjax.is_complex_dtype(pardtype) and holomorphic
+    ):
         centered_jacobian_fun = qgt_jacobian_pytree_logic.centered_jacobian_real_holo
+        mv = qgt_jacobian_pytree_logic._mat_vec
+    else:
+        centered_jacobian_fun = qgt_jacobian_pytree_logic.centered_jacobian_cplx
+        mv = qgt_jacobian_pytree_logic._mat_vec2
 
     if jit:
         mv = jax.jit(mv)
@@ -367,8 +372,6 @@ def test_matvec_treemv_modes(e, jit, holomorphic, pardtype, outdtype):
     def apply_fun(params, samples):
         return e.f(params["params"], samples)
 
-    mv = qgt_jacobian_pytree_logic.mat_vec
-
     homogeneous = pardtype is not None
 
     if not nkjax.is_complex_dtype(outdtype):
@@ -378,11 +381,7 @@ def test_matvec_treemv_modes(e, jit, holomorphic, pardtype, outdtype):
     else:
         mode = "complex"
 
-    if mode == "holomorphic":
-        v = e.v
-        reassemble = lambda x: x
-    else:
-        v, reassemble = nkjax.tree_to_real(e.v)
+    mv = partial(qgt_jacobian_pytree_logic.mat_vec, mode=mode)
 
     if jit:
         mv = jax.jit(mv)
@@ -390,32 +389,36 @@ def test_matvec_treemv_modes(e, jit, holomorphic, pardtype, outdtype):
     centered_oks, _ = qgt_jacobian_pytree_logic.prepare_centered_oks(
         apply_fun, e.params, e.samples, model_state, mode, rescale_shift
     )
-    actual = reassemble(mv(v, centered_oks, diag_shift))
+    actual = mv(e.v, centered_oks, diag_shift)
     expected = reassemble_complex(
         e.S_real @ e.v_real_flat + diag_shift * e.v_real_flat, target=e.target
     )
     assert tree_allclose(actual, expected)
 
 
-@pytest.mark.parametrize("holomorphic", [True])
+@pytest.mark.parametrize("holomorphic", [True, False])
 @pytest.mark.parametrize("n_samp", [25, 1024])
-@pytest.mark.parametrize(
-    "outdtype, pardtype", r_r_test_types + c_c_test_types + r_c_test_types
-)
-def test_scale_invariant_regularization(e, outdtype, pardtype):
+@pytest.mark.parametrize("outdtype, pardtype", test_types)
+def test_scale_invariant_regularization(e, outdtype, pardtype, holomorphic):
 
-    if not nkjax.is_complex_dtype(pardtype) and nkjax.is_complex_dtype(outdtype):
-        centered_jacobian_fun = qgt_jacobian_pytree_logic.centered_jacobian_cplx
-    else:
+    homogeneous = pardtype is not None
+    if (not nkjax.is_complex_dtype(outdtype)) or (
+        homogeneous and nkjax.is_complex_dtype(pardtype) and holomorphic
+    ):
         centered_jacobian_fun = qgt_jacobian_pytree_logic.centered_jacobian_real_holo
+        mv = qgt_jacobian_pytree_logic._mat_vec
+        rescale_fun = qgt_jacobian_pytree_logic._rescale
+    else:
+        centered_jacobian_fun = qgt_jacobian_pytree_logic.centered_jacobian_cplx
+        mv = qgt_jacobian_pytree_logic._mat_vec2
+        rescale_fun = qgt_jacobian_pytree_logic._rescale2
 
-    mv = qgt_jacobian_pytree_logic._mat_vec
     centered_oks = centered_jacobian_fun(e.f, e.params, e.samples)
     centered_oks = qgt_jacobian_pytree_logic._divide_by_sqrt_n_samp(
         centered_oks, e.samples
     )
 
-    centered_oks_scaled, scale = qgt_jacobian_pytree_logic._rescale(centered_oks)
+    centered_oks_scaled, scale = rescale_fun(centered_oks)
     actual = mv(e.v, centered_oks_scaled)
     expected = reassemble_complex(e.S_real_scaled @ e.v_real_flat, target=e.target)
     assert tree_allclose(actual, expected)

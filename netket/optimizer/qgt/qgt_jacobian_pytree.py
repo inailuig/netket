@@ -25,7 +25,7 @@ import netket.jax as nkjax
 
 from ..linear_operator import LinearOperator, Uninitialized
 
-from .qgt_jacobian_pytree_logic import mat_vec, prepare_centered_oks
+from .qgt_jacobian_pytree_logic import mat_vec, prepare_centered_oks, cplx_elemwise
 from .qgt_jacobian_common import choose_jacobian_mode
 
 
@@ -179,22 +179,13 @@ def _matmul(
     else:
         ravel = False
 
-    # Real-imaginary split RHS in R→R and R→C modes
-    reassemble = None
-    if self.mode != "holomorphic" and not self._in_solve:
-        vec, reassemble = nkjax.tree_to_real(vec)
-
     if self.scale is not None:
         vec = jax.tree_multimap(jnp.multiply, vec, self.scale)
 
-    result = mat_vec(vec, self.O, self.diag_shift)
+    result = mat_vec(vec, self.O, self.diag_shift, self.mode)
 
     if self.scale is not None:
         result = jax.tree_multimap(jnp.multiply, result, self.scale)
-
-    # Reassemble real-imaginary split as needed
-    if reassemble is not None:
-        result = reassemble(result)
 
     # Ravel PyTree back into vector as needed
     if ravel:
@@ -207,14 +198,19 @@ def _matmul(
 def _solve(
     self: QGTJacobianPyTreeT, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None
 ) -> PyTree:
-    # Real-imaginary split RHS in R→R and R→C modes
-    if self.mode != "holomorphic":
-        y, reassemble = nkjax.tree_to_real(y)
 
     if self.scale is not None:
-        y = jax.tree_multimap(jnp.divide, y, self.scale)
+        if self.mode == "complex":
+            y = jax.tree_multimap(cplx_elemwise(jnp.divide), y, (self.scale,) * 2)
+        else:
+            y = jax.tree_multimap(jnp.divide, y, self.scale)
         if x0 is not None:
-            x0 = jax.tree_multimap(jnp.multiply, x0, self.scale)
+            if self.mode == "complex":
+                x0 = jax.tree_multimap(
+                    cplx_elemwise(jnp.multiply), x0, (self.scale,) * 2
+                )
+            else:
+                x0 = jax.tree_multimap(jnp.multiply, x0, self.scale)
 
     # to pass the object LinearOperator itself down
     # but avoid rescaling, we pass down an object with
@@ -225,17 +221,21 @@ def _solve(
     out, info = solve_fun(unscaled_self, y, x0=x0)
 
     if self.scale is not None:
-        out = jax.tree_multimap(jnp.divide, out, self.scale)
-
-    # Reassemble real-imaginary split as needed
-    if self.mode != "holomorphic":
-        out = reassemble(out)
-
+        if self.mode == "complex":
+            out = jax.tree_multimap(cplx_elemwise(jnp.divide), out, (self.scale,) * 2)
+        else:
+            out = jax.tree_multimap(jnp.divide, out, self.scale)
     return out, info
 
 
 @jax.jit
 def _to_dense(self: QGTJacobianPyTreeT) -> jnp.ndarray:
+
+    # C->C and RC->C
+    # impossible since one would need 4 real numbers
+    # TODO convert to real ?
+    # assert self.mode != 'complex'
+
     O = jax.vmap(lambda l: nkjax.tree_ravel(l)[0])(self.O)
 
     if self.scale is None:
