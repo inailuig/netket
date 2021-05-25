@@ -99,7 +99,9 @@ def jacobian_cplx(
 
 
 centered_jacobian_real_holo = compose(tree_subtract_mean, jacobian_real_holo)
-centered_jacobian_cplx = compose(tree_subtract_mean, jacobian_cplx)
+centered_jacobian_cplx = compose(
+    tree_subtract_mean, partial(jacobian_cplx, _build_fn=lambda *x: x)
+)
 
 
 def _divide_by_sqrt_n_samp(oks, samples):
@@ -134,22 +136,68 @@ def stack_jacobian_tuple(centered_oks_re_im):
     )
 
 
+def _scale(oks):
+    return jax.tree_map(
+        lambda x: mpi.mpi_sum_jax(jnp.sum((x * x.conj()).real, axis=0, keepdims=True))[
+            0
+        ]
+        ** 0.5,
+        oks,
+    )
+
+
 def _rescale(centered_oks):
     """
     compute ΔOₖ/√Sₖₖ and √Sₖₖ
     to do scale-invariant regularization (Becca & Sorella 2017, pp. 143)
     Sₖₗ/(√Sₖₖ√Sₗₗ) = ΔOₖᴴΔOₗ/(√Sₖₖ√Sₗₗ) = (ΔOₖ/√Sₖₖ)ᴴ(ΔOₗ/√Sₗₗ)
     """
-    scale = jax.tree_map(
-        lambda x: mpi.mpi_sum_jax(jnp.sum((x * x.conj()).real, axis=0, keepdims=True))[
-            0
-        ]
-        ** 0.5,
-        centered_oks,
-    )
+    scale = _scale(centered_oks)
     centered_oks = jax.tree_multimap(jnp.divide, centered_oks, scale)
     scale = jax.tree_map(partial(jnp.squeeze, axis=0), scale)
     return centered_oks, scale
+
+
+def _cplx_elemwise(op, x, y):
+    if jnp.iscomplexobj(x) and jnp.iscomplexobj(y):
+        return jax.lax.complex(op(x.real, y.real), op(x.imag, y.imag))
+    else:
+        return op(x, y)
+
+
+def cplx_elemwise(op):
+    # apply op to imag and real part separately
+    return partial(_cplx_elemwise, op)
+
+
+def _rescale2(centered_oks):
+    # TODO simpler?
+    okr, oki = centered_oks
+    okrr = jax.tree_map(lambda x: x.real, okr)
+    okir = jax.tree_map(lambda x: x.real, oki)
+    okri = jax.tree_map(lambda x: x.imag if jnp.iscomplexobj(x) else None, okr)
+    okii = jax.tree_map(lambda x: x.imag if jnp.iscomplexobj(x) else None, oki)
+
+    _f = lambda x_: jax.tree_map(
+        lambda x: mpi.mpi_sum_jax((x ** 2).sum(axis=0, keepdims=True))[0], x_
+    )
+    srr = _f(okrr)
+    sri = _f(okri)
+    sir = _f(okir)
+    sii = _f(okii)
+    sr = jax.tree_map(lambda x, y: (x + y) ** 0.5, srr, sir)
+    si = jax.tree_map(lambda x, y: (x + y) ** 0.5, sri, sii)
+
+    # this is a complex scale where the real and imag part is to be scaled separately
+    s = jax.tree_multimap(
+        lambda sr, si: jax.lax.complex(sr, si) if si is not None else sr, sr, si
+    )
+
+    centered_oks_scaled = jax.tree_map(
+        cplx_elemwise(jnp.divide), centered_oks, (s,) * 2
+    )
+    scale = jax.tree_map(partial(jnp.squeeze, axis=0), s)
+    return centered_oks_scaled, scale
 
 
 def _jvp(oks: PyTree, v: PyTree) -> Array:
@@ -176,9 +224,72 @@ def _mat_vec(v: PyTree, oks: PyTree) -> PyTree:
     return tree_cast(res, v)
 
 
+def _jvp2(oks, v):
+    oks_r, oks_i = oks
+    wr = _jvp(oks_r, v).real
+    wi = _jvp(oks_i, v).real
+    return jax.lax.complex(wr, wi)
+
+
+def _vjp2(oks, w):
+    oks_r, oks_i = oks
+    t1 = _vjp(oks_r, w.real)
+    t2 = _vjp(oks_i, w.imag)
+    return jax.tree_multimap(jax.lax.sub, t1, t2)
+
+
+def _mat_vec2(v: PyTree, oks: PyTree) -> PyTree:
+    """
+    Compute ⟨O† O⟩v = ∑ₗ ⟨Oₖᴴ Oₗ⟩ vₗ
+    """
+    w = _jvp2(oks, v)
+    res = tree_conj(_vjp2(oks, w.conj()))
+    return tree_cast(res, v)
+
+
 # ==============================================================================
-# the logic above only works for R→R, R→C and holomorphic C→C
-# here the other modes are converted
+
+
+def _mode_switch(mode, x_real_holo, x_cplx):
+    if mode == "real" or mode == "holomorphic":
+        return x_real_holo
+    elif mode == "complex":
+        return x_cplx
+    else:
+        raise NotImplementedError(
+            'Differentiation mode should be one of "real", "complex", or "holomorphic", got {}'.format(
+                mode
+            )
+        )
+
+
+def _prepare_centered_oks(
+    forward_fn: Callable,
+    params: PyTree,
+    samples: Array,
+    mode: str,
+    rescale_shift: bool,
+) -> PyTree:
+    centered_jacobian_fun = _mode_switch(
+        mode, centered_jacobian_real_holo, centered_jacobian_cplx
+    )
+
+    centered_oks = _divide_by_sqrt_n_samp(
+        centered_jacobian_fun(
+            forward_fn,
+            params,
+            samples,
+        ),
+        samples,
+    )
+
+    # TODO optionally do the stacking via stack_jacobian_tuple for R->C
+
+    if rescale_shift:
+        rs = _mode_switch(mode, _rescale, _rescale2)
+        return rs(centered_oks)
+    else:
+        return centered_oks, None
 
 
 @partial(jax.jit, static_argnums=(0, 4, 5))
@@ -222,66 +333,24 @@ def prepare_centered_oks(
     def forward_fn(W, σ):
         return apply_fun({"params": W, **model_state}, σ)
 
-    if mode == "real":
-        split_complex_params = True  # convert C→R and R&C→R to R→R
-        centered_jacobian_fun = centered_jacobian_real_holo
-    elif mode == "complex":
-        split_complex_params = True  # convert C→C and R&C→C to R→C
-        # centered_jacobian_fun = compose(stack_jacobian, centered_jacobian_cplx)
-
-        # avoid converting to complex and then back
-        # by passing around the oks as a tuple of two pytrees representing the real and imag parts
-        centered_jacobian_fun = compose(
-            stack_jacobian_tuple,
-            partial(centered_jacobian_cplx, _build_fn=lambda *x: x),
-        )
-    elif mode == "holomorphic":
-        split_complex_params = False
-        centered_jacobian_fun = centered_jacobian_real_holo
-    else:
-        raise NotImplementedError(
-            'Differentiation mode should be one of "real", "complex", or "holomorphic", got {}'.format(
-                mode
-            )
-        )
-
-    if split_complex_params:
-        # doesn't do anything if the params are already real
-        params, reassemble = tree_to_real(params)
-
-        def f(W, σ):
-            return forward_fn(reassemble(W), σ)
-
-    else:
-        f = forward_fn
-
-    centered_oks = _divide_by_sqrt_n_samp(
-        centered_jacobian_fun(
-            f,
-            params,
-            samples,
-        ),
-        samples,
-    )
-    if rescale_shift:
-        return _rescale(centered_oks)
-    else:
-        return centered_oks, None
+    return _prepare_centered_oks(forward_fn, params, samples, mode, rescale_shift)
 
 
-def mat_vec(v: PyTree, centered_oks: PyTree, diag_shift: Scalar) -> PyTree:
+def mat_vec(v: PyTree, centered_oks: PyTree, diag_shift: Scalar, mode: str) -> PyTree:
     """
     Compute (S + δ) v = 1/n ⟨ΔO† ΔO⟩v + δ v = ∑ₗ 1/n ⟨ΔOₖᴴΔOₗ⟩ vₗ + δ vₗ
 
     Only compatible with R→R, R→C, and holomorphic C→C
-    for C→R, R&C→R, R&C→C and general C→C the parameters for generating ΔOⱼₖ should be converted to R,
-    and thus also the v passed to this function as well as the output are expected to be of this form
 
     Args:
         v: pytree representing the vector v compatible with centered_oks
         centered_oks: pytree of gradients 1/√n ΔOⱼₖ
         diag_shift: a scalar diagonal shift δ
+        mode: ...
     Returns:
         a pytree corresponding to the sr matrix-vector product (S + δ) v
     """
-    return tree_axpy(diag_shift, v, _mat_vec(v, centered_oks))
+
+    mv = _mode_switch(mode, _mat_vec, _mat_vec2)
+
+    return tree_axpy(diag_shift, v, mv(v, centered_oks))
