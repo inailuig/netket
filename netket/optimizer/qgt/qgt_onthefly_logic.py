@@ -18,7 +18,7 @@ from functools import partial
 from netket.stats import subtract_mean
 from netket.utils import mpi
 import netket.jax as nkjax
-from netket.jax import tree_conj, tree_dot, tree_cast, tree_axpy
+from netket.jax import tree_conj, tree_dot, tree_axpy
 
 # Stochastic Reconfiguration with jvp and vjp
 
@@ -40,69 +40,76 @@ def O_vjp(forward_fn, params, samples, w):
     return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # allreduce w/ MPI.SUM
 
 
-def O_vjp_rc(forward_fn, params, samples, w):
-    _, vjp_fun = jax.vjp(forward_fn, params, samples)
-    res_r, _ = vjp_fun(w)
-    res_i, _ = vjp_fun(-1.0j * w)
-    res = jax.tree_multimap(jax.lax.complex, res_r, res_i)
+def O_mean(forward_fn, params, samples):
+
+    r"""
+    compute ⟨O⟩
+    i.e. the mean of the rows of the jacobian of forward_fn
+    """
+    y, vjp_fun = jax.vjp(forward_fn, params, samples)
+
+    dtype = jnp.result_type(y)
+    w = jax.lax.broadcast(
+        jnp.array(1.0 / (samples.shape[0] * mpi.n_nodes), dtype=dtype),
+        samples.shape[:1],
+    )
+    res, _ = vjp_fun(w)
     return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # allreduce w/ MPI.SUM
 
 
-def O_mean(forward_fn, params, samples, holomorphic=True):
-    r"""
-    compute \langle O \rangle
-    i.e. the mean of the rows of the jacobian of forward_fn
-    """
+def _O_mean2(forward_fn, params, samples, *, assemble_fun):
+    y, vjp_fun = jax.vjp(forward_fn, params, samples)
 
-    # determine the output type of the forward pass
-    dtype = jax.eval_shape(forward_fn, params, samples).dtype
-    w = jnp.ones(samples.shape[0], dtype=dtype) * (
-        1.0 / (samples.shape[0] * mpi.n_nodes)
+    dtype = jnp.result_type(y)
+    w = jax.lax.broadcast(
+        jnp.array(1.0 / (samples.shape[0] * mpi.n_nodes), dtype=dtype),
+        samples.shape[:1],
     )
+    res_r, _ = vjp_fun(w)
+    res_i, _ = vjp_fun(-1.0j * w)
+    res = assemble_fun(res_r, res_i)
+    return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # allreduce w/ MPI.SUM
 
-    homogeneous = nkjax.tree_ishomogeneous(params)
-    real_params = not nkjax.tree_leaf_iscomplex(params)
-    real_out = not nkjax.is_complex(jax.eval_shape(forward_fn, params, samples))
 
-    if homogeneous and (real_params or holomorphic):
-        if real_params and not real_out:
-            # R->C
-            return O_vjp_rc(forward_fn, params, samples, w)
-        else:
-            # R->R and holomorphic C->C
-            return O_vjp(forward_fn, params, samples, w)
-    else:
-        # R&C -> C
-        # non-holomorphic
-        # C->R
-        assert False
+def O_mean_rc(*args):
+    r"""
+    compute ⟨O⟩
+    for a ℝ→ℂ function f(x) = u(x) + i v(x)
+    returns the mean along axis 0 of ∂x u + i ∂x v
+    """
+    return _O_mean2(*args, assemble_fun=partial(jax.tree_multimap, jax.lax.complex))
+
+
+def O_mean_cc(*args):
+    r"""
+    compute ⟨O⟩
+    for a ℂ→ℂ function f(x+iy) = u(x,y) + i v(x,y)
+    returns the mean along axis 0 of (∂x + i ∂y) u, (∂x + i ∂y) v
+    """
+    return _O_mean2(*args, assemble_fun=lambda *x: x)
 
 
 def OH_w(forward_fn, params, samples, w):
     r"""
-    compute  O^H w
-    (where ^H is the hermitian transpose)
+    compute  Oᴴw
+    (where ᴴ denotes the hermitian transpose)
     """
 
-    # O^H w = (w^H O)^H
+    # Oᴴw = (wᴴO)ᴴ
     # The transposition of the 1D arrays is omitted in the implementation:
-    # (w^H O)^H -> (w* O)*
+    # (wᴴO)ᴴ -> (w* O)*
 
-    # TODO The allreduce in O_vjp could be deferred until after the tree_cast
-    # where the amount of data to be transferred would potentially be smaller
-    res = tree_conj(O_vjp(forward_fn, params, samples, w.conjugate()))
-
-    return tree_cast(res, params)
+    return tree_conj(O_vjp(forward_fn, params, samples, w.conjugate()))
 
 
 def Odagger_O_v(forward_fn, params, samples, v, *, center=False):
     r"""
     if center=False (default):
-        compute \langle O^\dagger O \rangle v
+        compute ⟨O†O⟩v
 
     else (center=True):
-        compute \langle O^\dagger \Delta O \rangle v
-        where \Delta O = O - \langle O \rangle
+        compute ⟨O†ΔO⟩v
+        where ΔO = O-⟨O⟩
     """
 
     # w is an array of size n_samples; each MPI rank has its own slice
@@ -122,34 +129,49 @@ Odagger_DeltaO_v = partial(Odagger_O_v, center=True)
 def DeltaOdagger_DeltaO_v(forward_fn, params, samples, v, holomorphic=True):
 
     r"""
-    compute \langle \Delta O^\dagger \Delta O \rangle v
+    compute ⟨ΔO†ΔO⟩ v
 
-    where \Delta O = O - \langle O \rangle
+    where ΔO = O-⟨O⟩
     """
 
     homogeneous = nkjax.tree_ishomogeneous(params)
     real_params = not nkjax.tree_leaf_iscomplex(params)
-    #  real_out = not nkjax.is_complex(jax.eval_shape(forward_fn, params, samples))
+    complex_out = nkjax.is_complex(jax.eval_shape(forward_fn, params, samples))
 
-    if not (homogeneous and (real_params or holomorphic)):
-        # everything except R->R, holomorphic C->C and R->C
-        params, reassemble = nkjax.tree_to_real(params)
-        v, _ = nkjax.tree_to_real(v)
-        _forward_fn = forward_fn
+    if homogeneous and (real_params or (holomorphic and complex_out)):
+        if real_params and complex_out:
+            # ℝ→ℂ
+            omean = O_mean_rc(forward_fn, params, samples)
 
-        def forward_fn(p, x):
-            return _forward_fn(reassemble(p), x)
+        else:
+            # ℝ→ℝ
+            # holomorphic ℂ→ℂ
+            omean = O_mean(forward_fn, params, samples)
 
-    omean = O_mean(forward_fn, params, samples, holomorphic=holomorphic)
+        def forward_fn_centered(p, x):
+            return forward_fn(p, x) - tree_dot(p, omean)
 
-    def forward_fn_centered(p, x):
-        return forward_fn(p, x) - tree_dot(p, omean)
+    elif complex_out:
+        # non-holomorphic ℂ→ℂ
+        # non-homogeneous ℝ&ℂ→ℂ
 
-    res = Odagger_O_v(forward_fn_centered, params, samples, v)
+        omean_r, omean_i = O_mean_cc(forward_fn, params, samples)
 
-    if not (homogeneous and (real_params or holomorphic)):
-        res = reassemble(res)
-    return res
+        def forward_fn_centered(p, x):
+            return forward_fn(p, x) - jax.lax.complex(
+                tree_dot(p, omean_r).real, tree_dot(p, omean_i).real
+            )
+
+    else:
+        # ℂ→ℝ,
+        # non-homogeneous ℝ&ℂ→ℝ
+
+        omean = O_mean(forward_fn, params, samples)
+
+        def forward_fn_centered(p, x):
+            return forward_fn(p, x) - tree_dot(p, omean).real
+
+    return Odagger_O_v(forward_fn_centered, params, samples, v)
 
 
 # TODO block the computations (in the same way as done with MPI) if memory consumtion becomes an issue
@@ -161,11 +183,11 @@ def mat_vec(
 
     where the elements of S are given by one of the following equivalent formulations:
 
-    if centered=True (default): S_kl = \langle \Delta O_k^\dagger \Delta O_l \rangle
-    if centered=False : S_kl = \langle O_k^\dagger \Delta O_l \rangle
+    if centered=True (default): Sₖₗ = ⟨ΔOₖ†ΔOₗ⟩
+    if centered=False : Sₖₗ = ⟨Oₖ†ΔOₗ⟩
 
-    where \Delta O_k = O_k - \langle O_k \rangle
-    and O_k (operator) is derivative of the log wavefunction w.r.t parameter k
+    where ΔOₖ = Oₖ-⟨Oₖ⟩
+    and Oₖ (operator) is derivative of the log wavefunction w.r.t parameter k
     The expectation values are calculated as mean over the samples
 
     v: a pytree with the same structure as params
