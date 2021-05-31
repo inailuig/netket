@@ -40,7 +40,7 @@ def O_vjp(forward_fn, params, samples, w):
     return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # allreduce w/ MPI.SUM
 
 
-def O_mean(forward_fn, params, samples):
+def O_mean_real_holo(forward_fn, params, samples):
 
     r"""
     compute ⟨O⟩
@@ -57,7 +57,12 @@ def O_mean(forward_fn, params, samples):
     return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # allreduce w/ MPI.SUM
 
 
-def _O_mean2(forward_fn, params, samples, *, assemble_fun):
+def O_mean_complex(forward_fn, params, samples):
+    r"""
+    compute ⟨O⟩
+    for a ℂ→ℂ function f(x+iy) = u(x,y) + i v(x,y)
+    returns the mean along axis 0 of (∂x + i ∂y) u, (∂x + i ∂y) v
+    """
     y, vjp_fun = jax.vjp(forward_fn, params, samples)
 
     dtype = jnp.result_type(y)
@@ -67,26 +72,8 @@ def _O_mean2(forward_fn, params, samples, *, assemble_fun):
     )
     res_r, _ = vjp_fun(w)
     res_i, _ = vjp_fun(-1.0j * w)
-    res = assemble_fun(res_r, res_i)
+    res = res_r, res_i
     return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # allreduce w/ MPI.SUM
-
-
-def O_mean_rc(*args):
-    r"""
-    compute ⟨O⟩
-    for a ℝ→ℂ function f(x) = u(x) + i v(x)
-    returns the mean along axis 0 of ∂x u + i ∂x v
-    """
-    return _O_mean2(*args, assemble_fun=partial(jax.tree_multimap, jax.lax.complex))
-
-
-def O_mean_cc(*args):
-    r"""
-    compute ⟨O⟩
-    for a ℂ→ℂ function f(x+iy) = u(x,y) + i v(x,y)
-    returns the mean along axis 0 of (∂x + i ∂y) u, (∂x + i ∂y) v
-    """
-    return _O_mean2(*args, assemble_fun=lambda *x: x)
 
 
 def OH_w(forward_fn, params, samples, w):
@@ -134,28 +121,22 @@ def DeltaOdagger_DeltaO_v(forward_fn, params, samples, v, holomorphic=True):
     where ΔO = O-⟨O⟩
     """
 
-    homogeneous = nkjax.tree_ishomogeneous(params)
-    real_params = not nkjax.tree_leaf_iscomplex(params)
+    complex_params = not nkjax.tree_leaf_isreal(params)
     complex_out = nkjax.is_complex(jax.eval_shape(forward_fn, params, samples))
 
-    if homogeneous and (real_params or (holomorphic and complex_out)):
-        if real_params and complex_out:
-            # ℝ→ℂ
-            omean = O_mean_rc(forward_fn, params, samples)
-
-        else:
-            # ℝ→ℝ
-            # holomorphic ℂ→ℂ
-            omean = O_mean(forward_fn, params, samples)
+    if holomorphic and complex_params and complex_out:
+        # holomorphic ℂ→ℂ
+        omean = O_mean_real_holo(forward_fn, params, samples)
 
         def forward_fn_centered(p, x):
             return forward_fn(p, x) - tree_dot(p, omean)
 
     elif complex_out:
         # non-holomorphic ℂ→ℂ
-        # non-homogeneous ℝ&ℂ→ℂ
+        # ℝ&ℂ→ℂ
+        # ℝ→ℂ
 
-        omean_r, omean_i = O_mean_cc(forward_fn, params, samples)
+        omean_r, omean_i = O_mean_complex(forward_fn, params, samples)
 
         def forward_fn_centered(p, x):
             return forward_fn(p, x) - jax.lax.complex(
@@ -163,10 +144,11 @@ def DeltaOdagger_DeltaO_v(forward_fn, params, samples, v, holomorphic=True):
             )
 
     else:
-        # ℂ→ℝ,
-        # non-homogeneous ℝ&ℂ→ℝ
+        # ℝ→ℝ
+        # ℂ→ℝ
+        # ℝ&ℂ→ℝ
 
-        omean = O_mean(forward_fn, params, samples)
+        omean = O_mean_real_holo(forward_fn, params, samples)
 
         def forward_fn_centered(p, x):
             return forward_fn(p, x) - tree_dot(p, omean).real

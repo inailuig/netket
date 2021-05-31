@@ -211,7 +211,7 @@ def test_vjp(e):
 @pytest.mark.parametrize("n_samp", [25])
 @pytest.mark.parametrize("outdtype, pardtype", r_r_test_types + c_c_test_types)
 def test_mean(e):
-    actual = qgt_onthefly_logic.O_mean(e.f, e.params, e.samples)
+    actual = qgt_onthefly_logic.O_mean_real_holo(e.f, e.params, e.samples)
     expected = qgt_onthefly_logic.tree_conj(
         reassemble_complex(e.okmean_real.real, target=e.target)
     )
