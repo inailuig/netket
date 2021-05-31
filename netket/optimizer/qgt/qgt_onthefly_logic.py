@@ -35,8 +35,11 @@ def O_jvp(forward_fn, params, samples, v):
 
 
 def O_vjp(forward_fn, params, samples, w):
-    _, vjp_fun = jax.vjp(forward_fn, params, samples)
-    res, _ = vjp_fun(w)
+
+    y, vjp_fun = jax.vjp(forward_fn, params, samples)
+
+    res = jax.tree_map(lambda x: vjp_fun(x)[0], w)
+
     return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # allreduce w/ MPI.SUM
 
 
@@ -46,15 +49,10 @@ def O_mean_real_holo(forward_fn, params, samples):
     compute ⟨O⟩
     i.e. the mean of the rows of the jacobian of forward_fn
     """
-    y, vjp_fun = jax.vjp(forward_fn, params, samples)
-
-    dtype = jnp.result_type(y)
-    w = jax.lax.broadcast(
-        jnp.array(1.0 / (samples.shape[0] * mpi.n_nodes), dtype=dtype),
-        samples.shape[:1],
-    )
-    res, _ = vjp_fun(w)
-    return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # allreduce w/ MPI.SUM
+    y = jax.eval_shape(forward_fn, params, samples)
+    w = jnp.array(1.0 / (samples.shape[0] * mpi.n_nodes), dtype=y.dtype)
+    w = jax.lax.broadcast(w, y.shape)
+    return O_vjp(forward_fn, params, samples, w)
 
 
 def O_mean_complex(forward_fn, params, samples):
@@ -63,17 +61,10 @@ def O_mean_complex(forward_fn, params, samples):
     for a ℂ→ℂ function f(x+iy) = u(x,y) + i v(x,y)
     returns the mean along axis 0 of (∂x + i ∂y) u, (∂x + i ∂y) v
     """
-    y, vjp_fun = jax.vjp(forward_fn, params, samples)
-
-    dtype = jnp.result_type(y)
-    w = jax.lax.broadcast(
-        jnp.array(1.0 / (samples.shape[0] * mpi.n_nodes), dtype=dtype),
-        samples.shape[:1],
-    )
-    res_r, _ = vjp_fun(w)
-    res_i, _ = vjp_fun(-1.0j * w)
-    res = res_r, res_i
-    return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # allreduce w/ MPI.SUM
+    y = jax.eval_shape(forward_fn, params, samples)
+    w = jnp.array(1.0 / (samples.shape[0] * mpi.n_nodes), dtype=y.dtype)
+    w = jax.lax.broadcast(w, y.shape)
+    return O_vjp(forward_fn, params, samples, (w, -1.0j * w))
 
 
 def OH_w(forward_fn, params, samples, w):
