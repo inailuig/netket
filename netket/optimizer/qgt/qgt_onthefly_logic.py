@@ -43,7 +43,7 @@ def O_vjp(forward_fn, params, samples, w):
     return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # allreduce w/ MPI.SUM
 
 
-def O_mean_real_holo(forward_fn, params, samples):
+def O_mean(forward_fn, params, samples):
 
     r"""
     compute ⟨O⟩
@@ -117,7 +117,7 @@ def DeltaOdagger_DeltaO_v(forward_fn, params, samples, v, holomorphic=True):
 
     if holomorphic and complex_params and complex_out:
         # holomorphic ℂ→ℂ
-        omean = O_mean_real_holo(forward_fn, params, samples)
+        omean = O_mean(forward_fn, params, samples)
 
         def forward_fn_centered(p, x):
             return forward_fn(p, x) - tree_dot(p, omean)
@@ -139,7 +139,7 @@ def DeltaOdagger_DeltaO_v(forward_fn, params, samples, v, holomorphic=True):
         # ℂ→ℝ
         # ℝ&ℂ→ℝ
 
-        omean = O_mean_real_holo(forward_fn, params, samples)
+        omean = O_mean(forward_fn, params, samples)
 
         def forward_fn_centered(p, x):
             return forward_fn(p, x) - tree_dot(p, omean).real
