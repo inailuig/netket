@@ -35,11 +35,8 @@ def O_jvp(forward_fn, params, samples, v):
 
 
 def O_vjp(forward_fn, params, samples, w):
-
     y, vjp_fun = jax.vjp(forward_fn, params, samples)
-
     res = jax.tree_map(lambda x: vjp_fun(x)[0], w)
-
     return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # allreduce w/ MPI.SUM
 
 
