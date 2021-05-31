@@ -328,16 +328,20 @@ def test_matvec_linear_transpose(e, centered, jit):
 @pytest.mark.parametrize("holomorphic", [True, False])
 @pytest.mark.parametrize("n_samp", [25, 1024])
 @pytest.mark.parametrize("jit", [True, False])
-@pytest.mark.parametrize("outdtype, pardtype", test_types)
+@pytest.mark.parametrize("outdtype, pardtype", all_test_types)
 def test_matvec_treemv(e, jit, holomorphic, pardtype, outdtype):
     diag_shift = 0.01
 
-    real_par = not nkjax.is_complex_dtype(pardtype)
-    complex_out = nkjax.is_complex_dtype(outdtype)
     homogeneous = pardtype is not None
 
-    if (not nkjax.is_complex_dtype(outdtype)) or (
-        homogeneous and nkjax.is_complex_dtype(pardtype) and holomorphic
+    if not nkjax.is_complex_dtype(outdtype):
+        centered_jacobian_fun = qgt_jacobian_pytree_logic.centered_jacobian_real_holo
+        mv = qgt_jacobian_pytree_logic._mat_vec1
+    elif (
+        homogeneous
+        and nkjax.is_complex_dtype(pardtype)
+        and nkjax.is_complex_dtype(outdtype)
+        and holomorphic
     ):
         centered_jacobian_fun = qgt_jacobian_pytree_logic.centered_jacobian_real_holo
         mv = qgt_jacobian_pytree_logic._mat_vec
@@ -359,11 +363,10 @@ def test_matvec_treemv(e, jit, holomorphic, pardtype, outdtype):
 
 
 # TODO separate test for prepare_centered_oks
-# TODO test C->R ?
 @pytest.mark.parametrize("holomorphic", [True, False])
 @pytest.mark.parametrize("n_samp", [25, 1024])
 @pytest.mark.parametrize("jit", [True, False])
-@pytest.mark.parametrize("outdtype, pardtype", test_types)
+@pytest.mark.parametrize("outdtype, pardtype", all_test_types)
 def test_matvec_treemv_modes(e, jit, holomorphic, pardtype, outdtype):
     diag_shift = 0.01
     model_state = {}
@@ -376,7 +379,12 @@ def test_matvec_treemv_modes(e, jit, holomorphic, pardtype, outdtype):
 
     if not nkjax.is_complex_dtype(outdtype):
         mode = "real"
-    elif homogeneous and nkjax.is_complex_dtype(pardtype) and holomorphic:
+    elif (
+        homogeneous
+        and nkjax.is_complex_dtype(pardtype)
+        and nkjax.is_complex_dtype(outdtype)
+        and holomorphic
+    ):
         mode = "holomorphic"
     else:
         mode = "complex"
