@@ -218,7 +218,17 @@ def _mat_vec(v: PyTree, oks: PyTree) -> PyTree:
     """
     Compute ⟨O† O⟩v = ∑ₗ ⟨Oₖᴴ Oₗ⟩ vₗ
     """
-    res = tree_conj(_vjp(oks, _jvp(oks, v).conjugate()))
+    w = _jvp(oks, v)
+    res = tree_conj(_vjp(oks, w.conjugate()))
+    return tree_cast(res, v)
+
+
+def _mat_vec1(v: PyTree, oks: PyTree) -> PyTree:
+    """
+    Compute ⟨O† O⟩v = ∑ₗ ⟨Oₖᴴ Oₗ⟩ vₗ
+    """
+    w = _jvp(oks, v).real
+    res = tree_conj(_vjp(oks, w.conj()))
     return tree_cast(res, v)
 
 
@@ -248,11 +258,13 @@ def _mat_vec2(v: PyTree, oks: PyTree) -> PyTree:
 # ==============================================================================
 
 
-def _mode_switch(mode, x_real_holo, x_cplx):
-    if mode == "real" or mode == "holomorphic":
-        return x_real_holo
+def _mode_switch(mode, r, h, c):
+    if mode == "real":
+        return r
+    elif mode == "holomorphic":
+        return h
     elif mode == "complex":
-        return x_cplx
+        return c
     else:
         raise NotImplementedError(
             'Differentiation mode should be one of "real", "complex", or "holomorphic", got {}'.format(
@@ -268,8 +280,12 @@ def _prepare_centered_oks(
     mode: str,
     rescale_shift: bool,
 ) -> PyTree:
+
     centered_jacobian_fun = _mode_switch(
-        mode, centered_jacobian_real_holo, centered_jacobian_cplx
+        mode,
+        r=centered_jacobian_real_holo,
+        h=centered_jacobian_real_holo,
+        c=centered_jacobian_cplx,
     )
 
     centered_oks = _divide_by_sqrt_n_samp(
@@ -284,7 +300,7 @@ def _prepare_centered_oks(
     # TODO optionally do the stacking via stack_jacobian_tuple for R->C
 
     if rescale_shift:
-        rs = _mode_switch(mode, _rescale, _rescale2)
+        rs = _mode_switch(mode, r=_rescale, h=_rescale, c=_rescale2)
         return rs(centered_oks)
     else:
         return centered_oks, None
@@ -349,6 +365,6 @@ def mat_vec(v: PyTree, centered_oks: PyTree, diag_shift: Scalar, mode: str) -> P
         a pytree corresponding to the sr matrix-vector product (S + δ) v
     """
 
-    mv = _mode_switch(mode, _mat_vec, _mat_vec2)
+    mv = _mode_switch(mode, r=_mat_vec1, h=_mat_vec, c=_mat_vec2)
 
     return tree_axpy(diag_shift, v, mv(v, centered_oks))
