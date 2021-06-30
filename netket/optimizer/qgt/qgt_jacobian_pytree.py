@@ -19,6 +19,7 @@ import jax
 from jax import numpy as jnp
 from flax import struct
 
+import netket as nk
 from netket.utils.types import PyTree, Array
 from netket.utils import mpi
 import netket.jax as nkjax
@@ -211,7 +212,21 @@ def _solve(
     # mode=holomoprhic to disable splitting the complex part
     unscaled_self = self.replace(scale=None, _in_solve=True)
 
+    # TODO how to figure out if the solver accesses to_dense?
+    # convert y and x0 to real accordingly
+    solver_needs_dense = solve_fun in [
+        nk.optimizer.solver.cholesky,
+    ]
+
+    if self.mode == "complex" and solver_needs_dense:
+        y, reassemble_complex = nkjax.tree_to_real(y)
+        if x0 is not None:
+            x0, _ = nkjax.tree_to_real(x0)
+
     out, info = solve_fun(unscaled_self, y, x0=x0)
+
+    if self.mode == "complex" and solver_needs_dense:
+        out = reassemble_complex(out)
 
     if self.scale is not None:
         if self.mode == "complex":
