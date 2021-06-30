@@ -196,14 +196,12 @@ def _solve(
 
     if self.scale is not None:
         if self.mode == "complex":
-            y = jax.tree_multimap(cplx_elemwise(jnp.divide), y, (self.scale,) * 2)
+            y = jax.tree_multimap(cplx_elemwise(jnp.divide), y, self.scale)
         else:
             y = jax.tree_multimap(jnp.divide, y, self.scale)
         if x0 is not None:
             if self.mode == "complex":
-                x0 = jax.tree_multimap(
-                    cplx_elemwise(jnp.multiply), x0, (self.scale,) * 2
-                )
+                x0 = jax.tree_multimap(cplx_elemwise(jnp.multiply), x0, self.scale)
             else:
                 x0 = jax.tree_multimap(jnp.multiply, x0, self.scale)
 
@@ -217,7 +215,7 @@ def _solve(
 
     if self.scale is not None:
         if self.mode == "complex":
-            out = jax.tree_multimap(cplx_elemwise(jnp.divide), out, (self.scale,) * 2)
+            out = jax.tree_multimap(cplx_elemwise(jnp.divide), out, self.scale)
         else:
             out = jax.tree_multimap(jnp.divide, out, self.scale)
     return out, info
