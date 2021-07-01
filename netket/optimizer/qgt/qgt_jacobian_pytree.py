@@ -214,18 +214,24 @@ def _solve(
 
     # TODO how to figure out if the solver accesses to_dense?
     # convert y and x0 to real accordingly
-    solver_needs_dense = solve_fun in [
+
+    def _getf(f):
+        if isinstance(solve_fun, partial):
+            return f.func
+        return f
+
+    solver_needs_dense = _getf(solve_fun) in [
         nk.optimizer.solver.cholesky,
     ]
 
-    if self.mode == "complex" and solver_needs_dense:
+    if (not self._in_solve) and self.mode == "complex" and solver_needs_dense:
         y, reassemble_complex = nkjax.tree_to_real(y)
         if x0 is not None:
             x0, _ = nkjax.tree_to_real(x0)
 
     out, info = solve_fun(unscaled_self, y, x0=x0)
 
-    if self.mode == "complex" and solver_needs_dense:
+    if (not self._in_solve) and self.mode == "complex" and solver_needs_dense:
         out = reassemble_complex(out)
 
     if self.scale is not None:
@@ -241,10 +247,11 @@ def _to_dense(self: QGTJacobianPyTreeT) -> jnp.ndarray:
 
     O = self.O
     if self.mode == "complex":
-        Or, Oi = O
+        Or, Oi = nkjax.tree_conj(O)
         Or, _ = nkjax.tree_to_real(Or)
         Oi, _ = nkjax.tree_to_real(Oi)
         O = jax.tree_multimap(jax.lax.complex, Or, Oi)
+        # TODO do stacking instead of complex here and .real at the end ?
 
     O = jax.vmap(lambda l: nkjax.tree_ravel(l)[0])(O)
 
@@ -258,4 +265,9 @@ def _to_dense(self: QGTJacobianPyTreeT) -> jnp.ndarray:
         O = O * scale[jnp.newaxis, :]
         diag = jnp.diag(scale ** 2)
 
-    return mpi.mpi_sum_jax(O.T.conj() @ O)[0] + self.diag_shift * diag
+    res = mpi.mpi_sum_jax(O.T.conj() @ O)[0] + self.diag_shift * diag
+
+    if self.mode == "complex":
+        res = res.real
+
+    return res
