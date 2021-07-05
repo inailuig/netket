@@ -231,11 +231,25 @@ def tree_axpy(a: Scalar, x: PyTree, y: PyTree) -> PyTree:
     return jax.tree_multimap(lambda x_, y_: a * x_ + y_, x, y)
 
 
+def _bitcast(x, new_dtype):
+    # TODO eventually implement zero-copy version in XLA
+    new_dtype = jnp.dtype(new_dtype)
+    if is_real(x) and is_complex_dtype(new_dtype):
+        # R→C
+        assert 2 * x.dtype.itemsize == new_dtype.itemsize
+        assert x.shape[-1] == 2
+        return jax.lax.complex(x[..., 0], x[..., 1])
+    elif is_complex(x) and is_real_dtype(new_dtype):
+        # C→R
+        assert x.dtype.itemsize == 2 * new_dtype.itemsize
+        return jnp.stack((x.real, x.imag), axis=-1)
+    else:
+        return jax.lax.bitcast_convert_type(x, new_dtype)
+
+
 def _to_real(x):
     if jnp.iscomplexobj(x):
-        return x.real, x.imag
-        # TODO find a way to make it a nop?
-        # return jax.vmap(lambda y: jnp.array((y.real, y.imag)))(x)
+        return _bitcast(x, dtype_real(x))
     else:
         return x
 
