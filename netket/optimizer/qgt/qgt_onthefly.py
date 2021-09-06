@@ -23,12 +23,12 @@ import netket.jax as nkjax
 from netket.utils.types import PyTree
 from netket.utils import warn_deprecation
 
-from .qgt_onthefly_logic import mat_vec_factory
+from .qgt_onthefly_logic import mat_vec_factory, mat_vec_batched_factory
 
 from ..linear_operator import LinearOperator, Uninitialized
 
 
-def QGTOnTheFly(vstate=None, **kwargs) -> "QGTOnTheFlyT":
+def QGTOnTheFly(vstate=None, *, batch_size=0, **kwargs) -> "QGTOnTheFlyT":
     """
     Lazy representation of an S Matrix computed by performing 2 jvp
     and 1 vjp products, using the variational state's model, the
@@ -43,7 +43,7 @@ def QGTOnTheFly(vstate=None, **kwargs) -> "QGTOnTheFlyT":
         vstate: The variational State.
     """
     if vstate is None:
-        return partial(QGTOnTheFly, **kwargs)
+        return partial(QGTOnTheFly, batch_size=batch_size, **kwargs)
 
     if "centered" in kwargs:
         warn_deprecation(
@@ -51,18 +51,25 @@ def QGTOnTheFly(vstate=None, **kwargs) -> "QGTOnTheFlyT":
         )
         kwargs.pop("centered")
 
+    # TODO cleanup unbatch/batch
+
     if jnp.ndim(vstate.samples) == 2:
         samples = vstate.samples
     else:
         samples = vstate.samples.reshape((-1, vstate.samples.shape[-1]))
 
-    mat_vec = mat_vec_factory(
+    if batch_size == 0:
+        mv_factory = mat_vec_factory
+    else:
+        samples, _ = nkjax.batch(samples, batch_size)
+        mv_factory = mat_vec_batched_factory
+
+    mat_vec = mv_factory(
         forward_fn=vstate._apply_fun,
         params=vstate.parameters,
         model_state=vstate.model_state,
         samples=samples,
     )
-
     return QGTOnTheFlyT(
         _mat_vec=mat_vec,
         _params=vstate.parameters,

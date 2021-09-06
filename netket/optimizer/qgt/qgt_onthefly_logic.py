@@ -14,10 +14,18 @@
 
 import jax
 from jax.tree_util import Partial
-from functools import partial
+from functools import partial, wraps
 from netket.stats import subtract_mean
 from netket.utils import mpi
 from netket.jax import tree_conj, tree_axpy
+from netket.jax import (
+    scanmap,
+    scan_reduce,
+    scan_append,
+    compose,
+)
+
+from netket.jax._batch_utils import _batch, _unbatch
 
 # Stochastic Reconfiguration with jvp and vjp
 
@@ -56,3 +64,93 @@ def mat_vec_factory(forward_fn, params, model_state, samples):
 
     _, jvp_fn = jax.linearize(fun, params)
     return Partial(mat_vec, jvp_fn)
+
+
+# -------------------------------------------------------------------------------
+
+
+# a decorator which allreduces the result tree
+# TODO move somewhere else
+def allreduce(f):
+    # allreduce w/ MPI.SUM
+    return wraps(f)(compose(partial(jax.tree_map, lambda x: mpi.mpi_sum_jax(x)[0]), f))
+
+
+def batch_args(f, argnums, src=None):
+    if isinstance(argnums, int):
+        argnums = (argnums,)
+
+    def _f(*args):
+        batchsize = None if src is None else args[src].shape[1]
+        args = (_batch(a, batchsize) if i in argnums else a for i, a in enumerate(args))
+        return f(*args)
+
+    return _f
+
+
+def _unbatch_output(f):
+    return compose(_unbatch, f)
+
+
+@_unbatch_output
+@partial(scanmap, scan_fun=scan_append, argnums=2)
+def O_jvp(forward_fn, params, samples, v):
+    # TODO apply the transpose of sum_inplace (allreduce) to the arg v here
+    # in order to get correct transposition with MPI
+    _, res = jax.jvp(lambda p: forward_fn(p, samples), (params,), (v,))
+    return res
+
+
+_tree_xpy = partial(tree_axpy, 1)
+
+
+@allreduce  # MPI
+@partial(batch_args, argnums=3, src=2)  # batch w with batchsize from samples
+@partial(scanmap, scan_fun=partial(scan_reduce, op=_tree_xpy), argnums=(2, 3))
+def O_vjp(forward_fn, params, samples, w):
+    _, vjp_fun = jax.vjp(forward_fn, params, samples)
+    res, _ = vjp_fun(w)
+    return res
+
+
+def OH_w(forward_fn, params, samples, w):
+    return tree_conj(O_vjp(forward_fn, params, samples, w.conjugate()))
+
+
+def Odagger_DeltaO_v(forward_fn, params, samples, v):
+    w = O_jvp(forward_fn, params, samples, v)
+    w = w * (1.0 / (samples.shape[0] * samples.shape[1] * mpi.n_nodes))
+    w = subtract_mean(w)  # w/ MPI
+    return OH_w(forward_fn, params, samples, w)
+
+
+# @partial(jax.jit, static_argnums=1)
+def mat_vec_batched(forward_fn, params, samples, v, diag_shift):
+    res = Odagger_DeltaO_v(forward_fn, params, samples, v)
+    return tree_axpy(diag_shift, v, res)
+
+
+def matvec_batched_transposable(forward_fn, params, samples, v, diag_shift):
+    extra_args = (params, samples, diag_shift)
+
+    def _mv(extra_args, x):
+        params, samples, diag_shift = extra_args
+        return mat_vec_batched(forward_fn, params, samples, x, diag_shift)
+
+    def _mv_trans(extra_args, y):
+        # the linear operator is hermitian
+        params, samples, diag_shift = extra_args
+        return tree_conj(
+            mat_vec_batched(forward_fn, params, samples, tree_conj(y), diag_shift)
+        )
+
+    return jax.custom_derivatives.linear_call(_mv, _mv_trans, extra_args, v)
+
+
+@partial(jax.jit, static_argnums=0)
+def mat_vec_batched_factory(forward_fn, params, model_state, samples):
+    def fun(W, samples):
+        return forward_fn({"params": W, **model_state}, samples)
+
+    return Partial(partial(matvec_batched_transposable, fun), params, samples)
+    # return Partial(lambda f, *args: jax.jit(f)(*args), Partial(partial(mat_vec_batched, fun), params, samples))
