@@ -27,7 +27,7 @@ from netket.utils import mpi
 
 from netket.utils.types import Array, Callable, PyTree, Scalar
 
-from netket.jax import tree_cast, tree_conj, tree_axpy, tree_to_real
+from netket.jax import tree_conj, tree_axpy, tree_to_real
 
 
 # TODO better name and move it somewhere sensible
@@ -108,30 +108,6 @@ def _divide_by_sqrt_n_samp(oks, samples):
     return jax.tree_map(lambda x: x / np.sqrt(n_samp), oks)
 
 
-def stack_jacobian(centered_oks: PyTree) -> PyTree:
-    """
-    Return the real and imaginary parts of ΔOⱼₖ stacked along the sample axis
-    Re[S] = Re[(ΔOᵣ + i ΔOᵢ)ᴴ(ΔOᵣ + i ΔOᵢ)] = ΔOᵣᵀ ΔOᵣ + ΔOᵢᵀ ΔOᵢ = [ΔOᵣ ΔOᵢ]ᵀ [ΔOᵣ ΔOᵢ]
-    """
-    return jax.tree_map(
-        lambda x: jnp.concatenate([x.real, x.imag], axis=0), centered_oks
-    )
-
-
-def stack_jacobian_tuple(centered_oks_re_im):
-    """
-    stack the real and imaginary parts of ΔOⱼₖ along the sample axis
-
-    Re[S] = Re[(ΔOᵣ + i ΔOᵢ)ᴴ(ΔOᵣ + i ΔOᵢ)] = ΔOᵣᵀ ΔOᵣ + ΔOᵢᵀ ΔOᵢ = [ΔOᵣ ΔOᵢ]ᵀ [ΔOᵣ ΔOᵢ]
-
-    Args:
-        centered_oks_re_im : a tuple (ΔOᵣ, ΔOᵢ) of two PyTrees representing the real and imag part of ΔOⱼₖ
-    """
-    return jax.tree_multimap(
-        lambda re, im: jnp.concatenate([re, im], axis=0), *centered_oks_re_im
-    )
-
-
 def _rescale(centered_oks):
     """
     compute ΔOₖ/√Sₖₖ and √Sₖₖ
@@ -171,7 +147,7 @@ def _mat_vec(v: PyTree, oks: PyTree) -> PyTree:
     Compute ⟨O† O⟩v = ∑ₗ ⟨Oₖᴴ Oₗ⟩ vₗ
     """
     res = tree_conj(_vjp(oks, _jvp(oks, v).conjugate()))
-    return tree_cast(res, v)
+    return res
 
 
 # ==============================================================================
@@ -225,14 +201,7 @@ def prepare_centered_oks(
         centered_jacobian_fun = centered_jacobian_real_holo
     elif mode == "complex":
         split_complex_params = True  # convert C→C and R&C→C to R→C
-        # centered_jacobian_fun = compose(stack_jacobian, centered_jacobian_cplx)
-
-        # avoid converting to complex and then back
-        # by passing around the oks as a tuple of two pytrees representing the real and imag parts
-        centered_jacobian_fun = compose(
-            stack_jacobian_tuple,
-            partial(centered_jacobian_cplx, _build_fn=lambda *x: x),
-        )
+        centered_jacobian_fun = centered_jacobian_cplx
     elif mode == "holomorphic":
         split_complex_params = False
         centered_jacobian_fun = centered_jacobian_real_holo
