@@ -23,12 +23,12 @@ import netket.jax as nkjax
 from netket.utils.types import PyTree
 from netket.utils import warn_deprecation
 
-from .qgt_onthefly_logic import mat_vec_factory
+from .qgt_onthefly_logic import mat_vec_factory, mat_vec_chunked_factory
 
 from ..linear_operator import LinearOperator, Uninitialized
 
 
-def QGTOnTheFly(vstate=None, **kwargs) -> "QGTOnTheFlyT":
+def QGTOnTheFly(vstate=None, *, chunk_size=0, **kwargs) -> "QGTOnTheFlyT":
     """
     Lazy representation of an S Matrix computed by performing 2 jvp
     and 1 vjp products, using the variational state's model, the
@@ -43,7 +43,7 @@ def QGTOnTheFly(vstate=None, **kwargs) -> "QGTOnTheFlyT":
         vstate: The variational State.
     """
     if vstate is None:
-        return partial(QGTOnTheFly, **kwargs)
+        return partial(QGTOnTheFly, chunk_size=chunk_size, **kwargs)
 
     if "centered" in kwargs:
         warn_deprecation(
@@ -51,18 +51,25 @@ def QGTOnTheFly(vstate=None, **kwargs) -> "QGTOnTheFlyT":
         )
         kwargs.pop("centered")
 
+    # TODO cleanup unchunk/chunk
+
     if jnp.ndim(vstate.samples) == 2:
         samples = vstate.samples
     else:
         samples = vstate.samples.reshape((-1, vstate.samples.shape[-1]))
 
-    mat_vec = mat_vec_factory(
+    if chunk_size == 0:
+        mv_factory = mat_vec_factory
+    else:
+        samples, _ = nkjax.chunk(samples, chunk_size)
+        mv_factory = mat_vec_chunked_factory
+
+    mat_vec = mv_factory(
         forward_fn=vstate._apply_fun,
         params=vstate.parameters,
         model_state=vstate.model_state,
         samples=samples,
     )
-
     return QGTOnTheFlyT(
         _mat_vec=mat_vec,
         _params=vstate.parameters,
@@ -122,7 +129,7 @@ def onthefly_mat_treevec(
     # if hasa ndim it's an array and not a pytree
     if hasattr(vec, "ndim"):
         if not vec.ndim == 1:
-            raise ValueError("Unsupported mat-vec for batches of vectors")
+            raise ValueError("Unsupported mat-vec for chunkes of vectors")
         # If the input is a vector
         if not nkjax.tree_size(S._params) == vec.size:
             raise ValueError(
