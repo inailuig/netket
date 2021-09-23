@@ -17,6 +17,7 @@ from netket.operator import (
     Squared,
 )
 
+from .base import expect
 from .mc_state import MCState
 from .mc_mixed_state import MCMixedState
 
