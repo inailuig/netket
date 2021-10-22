@@ -17,6 +17,9 @@ from numba import jit
 import numpy as np
 import math
 
+import jax
+import jax.numpy as jnp
+
 from netket.graph import AbstractGraph, Graph
 from netket.hilbert import AbstractHilbert, Fock
 from netket.utils.types import DType
@@ -352,6 +355,42 @@ class Ising(SpecialHamiltonian):
 
     def __repr__(self):
         return f"Ising(J={self._J}, h={self._h}; dim={self.hilbert.size})"
+
+
+@jax.jit
+def _ising_kernel_jax(x, edges, h, J):
+
+    x = x.astype(jnp.int32)
+    n_sites = x.shape[1]
+    n_conn = n_sites + 1
+
+    mels = jnp.zeros((x.shape[0], n_conn))  # TODO set dtype to same as h
+
+    mels = mels.at[:, 1:].set(-h)
+
+    mels = mels.at[:, 0].add(J * (x[:, edges[:, 0]] * x[:, edges[:, 1]]).sum(axis=-1))
+
+    x_prime = jax.lax.broadcast_in_dim(x, (x.shape[0], n_conn, n_sites), (0, 2))
+
+    # TODO more efficient?
+    # uses auto broadcast
+    x_prime = x_prime * (
+        jnp.ones((n_conn, n_sites)) - 2 * jnp.eye(n_conn, n_sites, k=-1)
+    )
+
+    # TODO do we need them?
+    # sections = (jnp.arange(x.shape[0]) + 1) * n_conn
+    # return x_prime.reshape((-1, n_sites)), mels.ravel(), sections
+    return x_prime, mels
+
+
+class IsingJax(Ising):
+    def __init__(self, *args, **kwargs):
+        super(IsingJax, self).__init__(*args, **kwargs)
+        self._edges = jnp.asarray(self._edges, dtype=jnp.int32)
+
+    def get_conn_padded(self, x):
+        return _ising_kernel_jax(x.astype(jnp.int32), self._edges, self._h, self._J)
 
 
 class Heisenberg(GraphOperator):
