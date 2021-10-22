@@ -1,8 +1,6 @@
 from functools import partial
 from typing import Any, Callable, Tuple
 
-import numpy as np
-
 import jax
 from jax import numpy as jnp
 from jax import tree_map
@@ -50,7 +48,7 @@ def expect_and_grad(
     Ô = Ô.parent
 
     σ = vstate.samples
-    σp, mels = Ô.get_conn_padded(np.asarray(σ.reshape((-1, σ.shape[-1]))))
+    σp, mels = Ô.get_conn_padded(σ.reshape((-1, σ.shape[-1])))
 
     Ō, Ō_grad, new_model_state = grad_expect_operator_kernel(
         vstate.sampler.machine_pow,
@@ -83,7 +81,7 @@ def expect_and_grad(  # noqa: F811
     Ô = Ô.parent
 
     σ = vstate.samples
-    σp, mels = Ô.get_conn_padded(np.asarray(σ.reshape((-1, σ.shape[-1]))))
+    σp, mels = Ô.get_conn_padded(σ.reshape((-1, σ.shape[-1])))
 
     Ō, Ō_grad, new_model_state = grad_expect_operator_Lrho2(
         vstate._apply_fun,
@@ -115,7 +113,7 @@ def expect_and_grad(  # noqa: F811
     _check_hilbert(vstate, Ô)
 
     σ = vstate.samples
-    σp, mels = Ô.get_conn_padded(np.asarray(σ.reshape((-1, σ.shape[-1]))))
+    σp, mels = Ô.get_conn_padded(σ.reshape((-1, σ.shape[-1])))
 
     Ō, Ō_grad, new_model_state = grad_expect_hermitian(
         vstate._apply_fun,
@@ -144,7 +142,7 @@ def expect_and_grad(  # noqa: F811
     _check_hilbert(vstate, Ô)
 
     σ = vstate.samples
-    σp, mels = Ô.get_conn_padded(np.asarray(σ.reshape((-1, σ.shape[-1]))))
+    σp, mels = Ô.get_conn_padded(σ.reshape((-1, σ.shape[-1])))
 
     Ō, Ō_grad, new_model_state = grad_expect_operator_kernel(
         vstate.sampler.machine_pow,
