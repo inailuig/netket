@@ -20,6 +20,10 @@ import numpy as np
 from numba import jit
 from itertools import product
 
+import jax
+import jax.numpy as jnp
+from functools import partial
+
 from netket.hilbert import Qubit, AbstractHilbert
 
 from ._discrete_operator import DiscreteOperator
@@ -528,3 +532,109 @@ def _matmul(op_arr1, w_arr1, op_arr2, w_arr2):
     operators, weights = np.array(operators), np.array(weights)
     operators, weights = _reduce_pauli_string(operators, weights)
     return operators, weights
+
+
+def _get_mask(z_check, nz_check, n_op):
+    m1_ = jax.lax.broadcast(jnp.arange(z_check.shape[2]), z_check.shape[:-1])
+    mask1 = m1_ < jnp.expand_dims(nz_check, 2)
+    mask2_ = jax.lax.broadcast(
+        jnp.arange(nz_check.shape[1]), nz_check.shape[:-1]
+    ) < jnp.expand_dims(n_op, 1)
+    mask2 = jnp.expand_dims(mask2_, 2)
+    mask = mask1 * mask2
+    return mask, mask2_
+
+
+def _get_sindmask(sites, ns):
+    smask = jax.lax.broadcast(
+        jnp.arange(sites.shape[-1]), sites.shape[:-1]
+    ) < jnp.expand_dims(ns, 1)
+    a = jnp.arange(sites.shape[1]) + 1
+    # TODO avoid transposing
+    sindmask = (
+        (jnp.expand_dims(a, (1, 2)) == jnp.expand_dims((sites + 1) * smask, 0))
+        .sum(axis=2)
+        .T
+    )
+    return sindmask.astype(bool)
+
+
+def sindmask(ha):
+    return _get_sindmask(ha._sites, ha._ns)[:, : ha.size]
+
+
+def mask_mask2(ha):
+    return _get_mask(ha._z_check, ha._nz_check, ha._n_op)
+
+
+# @partial(jax.jit, static_argnames="max_conn", inline=True)
+@partial(jax.vmap, in_axes=(0,) + (None,) * 6)
+def _pauli_strings_mels_jax(xb, mask, mask2, z_check, weights, cutoff, max_conn):
+    n_z = (mask * (xb[z_check] == 1)).sum(axis=-1)
+    mel = (mask2 * weights * (-1.0) ** n_z).sum(axis=1)
+    mels = jax.lax.select(jnp.abs(mel) > cutoff, mel, jnp.zeros_like(mel))
+    return mels
+
+
+# @partial(jax.jit, static_argnames="max_conn", inline=True)
+@partial(jax.vmap, in_axes=(0,) + (None,) * 2)
+def _pauli_strings_conn_states_jax(xb, sindmask, max_conn):
+    x_prime = jax.lax.broadcast(xb, (max_conn,))
+    # TODO only works with qubits
+    _flip = lambda x: 1 - x
+    x_prime = jax.lax.select(sindmask, _flip(x_prime), x_prime)
+
+    # TODO set x_prime of mel < cutoff to e.g. |000000> ?
+    # x_prime = x_prime * jnp.expand_dims(
+    #    jnp.abs(mels) > cutoff, 1
+    # )
+
+    return x_prime
+
+
+@partial(jax.jit, static_argnames="max_conn", inline=True)
+def _pauli_strings_kernel_jax(
+    xb, mask, mask2, sindmask, z_check, weights, cutoff, max_conn
+):
+
+    mels = _pauli_strings_mels_jax(xb, mask, mask2, z_check, weights, cutoff, max_conn)
+    x_prime = _pauli_strings_conn_states_jax(xb, sindmask, max_conn)
+
+    return x_prime, mels
+
+
+@partial(jax.jit, static_argnames="max_conn", inline=True)
+def _pauli_strings_n_conn_jax(x, mask, mask2, z_check, weights, cutoff, max_conn):
+    # TODO avoid computing mels twice
+    mels = _pauli_strings_mels_jax(x, mask, mask2, z_check, weights, cutoff, max_conn)
+    return (jnp.abs(mels) > cutoff).sum(axis=-1)
+
+
+# TODO don't inherit from PauliStrings
+class PauliStringsJax(PauliStrings):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._setup()
+
+        m, m2 = mask_mask2(self)
+        sm = sindmask(self)
+        self._masks = m, m2, sm
+        self._args_jax = jax.tree_map(
+            lambda x: jnp.asarray(x), (self._z_check, self._weights)
+        )
+
+    def get_conn_padded(self, x):
+        return _pauli_strings_kernel_jax(
+            x, *self._masks, *self._args_jax, self._cutoff, self._n_operators
+        )
+
+    def n_conn(self, x):
+        return _pauli_strings_n_conn_jax(
+            x, *self._masks[:-1], *self._args_jax, self._cutoff, self._n_operators
+        )
+
+    def get_conn_flattened(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def get_conn(self, x):
+        raise NotImplementedError
