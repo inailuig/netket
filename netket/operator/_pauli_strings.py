@@ -19,6 +19,10 @@ from netket.utils.types import DType
 import numpy as np
 from numba import jit
 
+import jax
+import jax.numpy as jnp
+from functools import partial
+
 from netket.hilbert import Qubit
 
 from ._discrete_operator import DiscreteOperator
@@ -294,3 +298,73 @@ class PauliStrings(DiscreteOperator):
             )
 
         return jit(nopython=True)(gccf_fun)
+
+
+def _get_mask(z_check, nz_check, n_op):
+    m1_ = jax.lax.broadcast(jnp.arange(z_check.shape[2]), z_check.shape[:-1])
+    mask1 = m1_ < jnp.expand_dims(nz_check, 2)
+    mask2_ = jax.lax.broadcast(
+        jnp.arange(nz_check.shape[1]), nz_check.shape[:-1]
+    ) < jnp.expand_dims(n_op, 1)
+    mask2 = jnp.expand_dims(mask2_, 2)
+    mask = mask1 * mask2
+    return mask, mask2_
+
+
+def _get_sindmask(sites, ns):
+    smask = jax.lax.broadcast(
+        jnp.arange(sites.shape[-1]), sites.shape[:-1]
+    ) < jnp.expand_dims(ns, 1)
+    a = jnp.arange(sites.shape[1]) + 1
+    # TODO avoid transposing
+    sindmask = (
+        (jnp.expand_dims(a, (1, 2)) == jnp.expand_dims((sites + 1) * smask, 0))
+        .sum(axis=2)
+        .T
+    )
+    return sindmask.astype(bool)
+
+
+def sindmask(ha):
+    return _get_sindmask(ha._sites, ha._ns)[:, : ha.size]
+
+
+def mask_mask2(ha):
+    return _get_mask(ha._z_check, ha._nz_check, ha._n_op)
+
+
+@partial(jax.jit, static_argnames="max_conn")
+@partial(jax.vmap, in_axes=(0,) + (None,) * 7)
+def _pauli_strings_kernel_jax(
+    xb, mask, mask2, sindmask, z_check, weights, cutoff, max_conn
+):
+
+    n_z = (mask * (xb[z_check] == 1)).sum(axis=-1)
+    mel = (mask2 * weights * (-1.0) ** n_z).sum(axis=1)
+    mels = jax.lax.select(jnp.abs(mel) > cutoff, mel, jnp.zeros_like(mel))
+
+    x_prime = jax.lax.broadcast(xb, (max_conn,))
+    x_prime = jax.lax.select(sindmask, 1 - x_prime, x_prime)
+
+    x_prime = x_prime * jnp.expand_dims(
+        jnp.abs(mels) > cutoff, 1
+    )  # set mel<cutoff to 000000
+
+    return x_prime, mels
+
+
+class PauliStringsJax(PauliStrings):
+    def __init__(self, *args, **kwargs):
+        super(PauliStringsJax, self).__init__(*args, **kwargs)
+
+        m, m2 = mask_mask2(self)
+        sm = sindmask(self)
+        self._masks = m, m2, sm
+        self._args_jax = jax.tree_map(
+            lambda x: jnp.asarray(x), (self._z_check, self._weights)
+        )
+
+    def get_conn_padded(self, x):
+        return _pauli_strings_kernel_jax(
+            x, *self._masks, *self._args_jax, self._cutoff, self._n_operators
+        )
