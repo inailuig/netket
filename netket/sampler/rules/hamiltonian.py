@@ -15,6 +15,8 @@
 import math
 
 import jax
+import jax.numpy as jnp
+
 import numpy as np
 
 from flax import struct
@@ -114,3 +116,19 @@ def _choose(vp, sections, rand_vec, out, w):
         out[i] = vp[n_rand]
         w[i] = math.log(s - low_range)
         low_range = s
+
+
+@struct.dataclass
+class HamiltonianRuleJax(HamiltonianRule):
+    def transition(rule, _0, _1, _2, _3, key, v):
+        rand_vec = jax.random.uniform(key, shape=(v.shape[0],))
+
+        vp, mels = rule.operator.get_conn_padded(v)
+        # TODO do this in the operator?
+        n_conn = (jnp.abs(mels) > 0).sum(axis=-1)
+        # TODO check this is exact uniform int
+        rand_i = jnp.floor(rand_vec * n_conn).astype(int)
+        # TODO nicer slicing
+        v_proposed = vp[jnp.arange(vp.shape[0]), rand_i]
+
+        return v_proposed, None
