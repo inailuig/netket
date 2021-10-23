@@ -333,7 +333,7 @@ def mask_mask2(ha):
     return _get_mask(ha._z_check, ha._nz_check, ha._n_op)
 
 
-@partial(jax.jit, static_argnames="max_conn")
+@partial(jax.jit, static_argnames="max_conn", inline=True)
 @partial(jax.vmap, in_axes=(0,) + (None,) * 7)
 def _pauli_strings_kernel_jax(
     xb, mask, mask2, sindmask, z_check, weights, cutoff, max_conn

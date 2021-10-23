@@ -19,6 +19,7 @@ import math
 
 import jax
 import jax.numpy as jnp
+from functools import partial
 
 from netket.graph import AbstractGraph, Graph
 from netket.hilbert import AbstractHilbert, Fock
@@ -357,7 +358,7 @@ class Ising(SpecialHamiltonian):
         return f"Ising(J={self._J}, h={self._h}; dim={self.hilbert.size})"
 
 
-@jax.jit
+@partial(jax.jit, inline=True)
 def _ising_kernel_jax(x, edges, h, J):
 
     x = x.astype(jnp.int32)
