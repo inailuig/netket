@@ -14,7 +14,7 @@
 
 import jax
 from jax.tree_util import Partial
-from functools import partial, wraps
+from functools import partial
 from netket.stats import subtract_mean
 from netket.utils import mpi
 from netket.jax import tree_conj, tree_axpy
@@ -22,10 +22,8 @@ from netket.jax import (
     scanmap,
     scan_reduce,
     scan_append,
-    compose,
+    unchunk,
 )
-
-from netket.jax._chunk_utils import _chunk, _unchunk
 
 # Stochastic Reconfiguration with jvp and vjp
 
@@ -69,30 +67,6 @@ def mat_vec_factory(forward_fn, params, model_state, samples):
 # -------------------------------------------------------------------------------
 
 
-# a decorator which allreduces the result tree
-# TODO move somewhere else
-def allreduce(f):
-    # allreduce w/ MPI.SUM
-    return wraps(f)(compose(partial(jax.tree_map, lambda x: mpi.mpi_sum_jax(x)[0]), f))
-
-
-def chunk_args(f, argnums, src=None):
-    if isinstance(argnums, int):
-        argnums = (argnums,)
-
-    def _f(*args):
-        chunksize = None if src is None else args[src].shape[1]
-        args = (_chunk(a, chunksize) if i in argnums else a for i, a in enumerate(args))
-        return f(*args)
-
-    return _f
-
-
-def _unchunk_output(f):
-    return compose(_unchunk, f)
-
-
-@_unchunk_output
 @partial(scanmap, scan_fun=scan_append, argnums=2)
 def O_jvp(forward_fn, params, samples, v):
     # TODO apply the transpose of sum_inplace (allreduce) to the arg v here
@@ -101,12 +75,7 @@ def O_jvp(forward_fn, params, samples, v):
     return res
 
 
-_tree_xpy = partial(tree_axpy, 1)
-
-
-@allreduce  # MPI
-@partial(chunk_args, argnums=3, src=2)  # chunk w with chunksize from samples
-@partial(scanmap, scan_fun=partial(scan_reduce, op=_tree_xpy), argnums=(2, 3))
+@partial(scanmap, scan_fun=scan_reduce, argnums=(2, 3))
 def O_vjp(forward_fn, params, samples, w):
     _, vjp_fun = jax.vjp(forward_fn, params, samples)
     res, _ = vjp_fun(w)
@@ -120,8 +89,10 @@ def OH_w(forward_fn, params, samples, w):
 def Odagger_DeltaO_v(forward_fn, params, samples, v):
     w = O_jvp(forward_fn, params, samples, v)
     w = w * (1.0 / (samples.shape[0] * samples.shape[1] * mpi.n_nodes))
-    w = subtract_mean(w)  # w/ MPI
-    return OH_w(forward_fn, params, samples, w)
+    w_, chunk_fn = unchunk(w)
+    w = chunk_fn(subtract_mean(w_))  # w/ MPI
+    res = OH_w(forward_fn, params, samples, w)
+    return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # MPI
 
 
 # @partial(jax.jit, static_argnums=1)
