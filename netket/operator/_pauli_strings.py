@@ -576,13 +576,30 @@ def _pauli_strings_mels_jax(xb, mask, mask2, z_check, weights, cutoff, max_conn)
     return mels
 
 
-# @partial(jax.jit, static_argnames="max_conn", inline=True)
+# @partial(jax.jit, static_argnames=("max_conn","local_states"), inline=True)
 @partial(jax.vmap, in_axes=(0,) + (None,) * 2)
-def _pauli_strings_conn_states_jax(xb, sindmask, max_conn):
+def _pauli_strings_conn_states_jax(xb, sindmask, max_conn, local_states):
     x_prime = jax.lax.broadcast(xb, (max_conn,))
-    # TODO only works with qubits
-    _flip = lambda x: 1 - x
-    x_prime = jax.lax.select(sindmask, _flip(x_prime), x_prime)
+
+    # TODO don't copypaste from IsingJax
+    def _flip_if(cond, x, local_states):
+        # TODO here we could special-case for qubit / ising
+        # by taking -x / 1-x
+        # i.e
+        # if local_states[0]-local_states[1] == 0:
+        #      return jax.lax.select(cond, -x, x)
+        # elif local_states[0] == 0:
+        #     return jax.lax.select(cond, local_states[1]-x, x)
+        # elif local_states[1] == 0:
+        #     return jax.lax.select(cond, local_states[0]-x, x)
+        # else:
+        #     ...
+        was_state_0 = x == local_states[0]
+        state_0 = jax.lax.broadcast(local_states[0], x.shape)
+        state_1 = jax.lax.broadcast(local_states[1], x.shape)
+        return jax.lax.select(jax.lax.bitwise_xor(cond, was_state_0), state_0, state_1)
+
+    x_prime = _flip_if(sindmask, x_prime)
 
     # TODO set x_prime of mel < cutoff to e.g. |000000> ?
     # x_prime = x_prime * jnp.expand_dims(
