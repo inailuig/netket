@@ -383,8 +383,8 @@ def _ising_conn_states_jax(x, edges, h, J):
     def _flip_lower_diag(x):
         # TODO only works for spin 1/2
         _flip = jax.lax.neg
-        cond = jnp.eye(*x.shape[:2], k=-1, dtype=bool)
-        cond = jax.lax.broadcast_in_dim(cond, x.shape, (0, 1))
+        cond = jnp.eye(*x.shape[-2:], k=-1, dtype=bool)
+        cond = jax.lax.broadcast(cond, x.shape[:-2])
         return jax.lax.select(cond, _flip(x), x)
 
     x_prime = jax.lax.broadcast_in_dim(x, (x.shape[0], n_conn_max, n_sites), (0, 2))
