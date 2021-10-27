@@ -203,16 +203,24 @@ def test_reassemble_complex(e):
 
 
 @pytest.mark.parametrize("holomorphic", [True, False])
-@pytest.mark.parametrize("n_samp", [25, 1024])
+@pytest.mark.parametrize("n_samp", [24, 1024])
 @pytest.mark.parametrize("jit", [True, False])
 @pytest.mark.parametrize("outdtype, pardtype", all_test_types)
-def test_matvec(e, jit):
+@pytest.mark.parametrize("batch_size", [8, None])
+def test_matvec(e, jit, batch_size):
     diag_shift = 0.01
 
     def f(params_model_state, x):
         return e.f(params_model_state["params"], x)
 
-    mv = qgt_onthefly_logic.mat_vec_factory(f, e.params, {}, e.samples)
+    if batch_size is None:
+        mat_vec_factory = qgt_onthefly_logic.mat_vec_factory
+        samples = e.samples
+    else:
+        mat_vec_factory = qgt_onthefly_logic.mat_vec_batched_factory
+        samples = e.samples.reshape((-1, batch_size) + e.samples.shape[1:])
+
+    mv = mat_vec_factory(f, e.params, {}, samples)
     if jit:
         mv = jax.jit(mv)
     actual = mv(e.v, diag_shift)
@@ -223,14 +231,22 @@ def test_matvec(e, jit):
 
 
 @pytest.mark.parametrize("holomorphic", [True, False])
-@pytest.mark.parametrize("n_samp", [25, 1024])
+@pytest.mark.parametrize("n_samp", [24, 1024])
 @pytest.mark.parametrize("jit", [True, False])
 @pytest.mark.parametrize("outdtype, pardtype", all_test_types)
-def test_matvec_linear_transpose(e, jit):
+@pytest.mark.parametrize("batch_size", [8, None])
+def test_matvec_linear_transpose(e, jit, batch_size):
     def f(params_model_state, x):
         return e.f(params_model_state["params"], x)
 
-    mv = qgt_onthefly_logic.mat_vec_factory(f, e.params, {}, e.samples)
+    if batch_size is None:
+        mat_vec_factory = qgt_onthefly_logic.mat_vec_factory
+        samples = e.samples
+    else:
+        mat_vec_factory = qgt_onthefly_logic.mat_vec_batched_factory
+        samples = e.samples.reshape((-1, batch_size) + e.samples.shape[1:])
+
+    mv = mat_vec_factory(f, e.params, {}, samples)
 
     def mvt(v, w):
         (res,) = jax.linear_transpose(lambda v_: mv(v_, 0.0), v)(w)

@@ -32,6 +32,10 @@ QGT_objects = {}
 
 QGT_objects["OnTheFly"] = partial(qgt.QGTOnTheFly, diag_shift=0.01)
 
+QGT_objects["OnTheFly(batch_size=16)"] = partial(
+    qgt.QGTOnTheFly, diag_shift=0.01, batch_size=16
+)
+
 QGT_objects["JacobianPyTree"] = partial(qgt.QGTJacobianPyTree, diag_shift=0.01)
 QGT_objects["JacobianPyTree(mode=holomorphic)"] = partial(
     qgt.QGTJacobianPyTree, holomorphic=True, diag_shift=0.01
