@@ -21,6 +21,8 @@ from netket.operator import (
     _der_local_values_jax,
 )
 
+from .base import expect_and_grad
+
 from .mc_state import MCState
 from .mc_mixed_state import MCMixedState
 
@@ -35,11 +37,12 @@ def _check_hilbert(A, B):
 
 
 # pure state, squared operator
-@dispatch
+@expect_and_grad.dispatch
 def expect_and_grad(
     vstate: MCState,
     Ô: Squared[DiscreteOperator],
     use_covariance: TrueT,
+    *,
     mutable: Any,
 ) -> Tuple[Stats, PyTree]:
     _check_hilbert(vstate, Ô)
@@ -68,11 +71,12 @@ def expect_and_grad(
 
 
 # mixed state, squared super-operator
-@dispatch
+@expect_and_grad.dispatch
 def expect_and_grad(  # noqa: F811
     vstate: MCMixedState,
     Ô: Squared[AbstractSuperOperator],
     use_covariance: TrueT,
+    *,
     mutable: Any,
 ) -> Tuple[Stats, PyTree]:
     _check_hilbert(vstate, Ô)
@@ -100,13 +104,14 @@ def expect_and_grad(  # noqa: F811
 
 # mixed state, hermitian operator
 @dispatch.multi(
-    (MCState, DiscreteOperator, TrueT, Any),
-    (MCMixedState, AbstractSuperOperator, TrueT, Any),
+    (MCState, DiscreteOperator, TrueT),
+    (MCMixedState, AbstractSuperOperator, TrueT),
 )
 def expect_and_grad(  # noqa: F811
     vstate: MCState,
     Ô: DiscreteOperator,
     use_covariance: TrueT,
+    *,
     mutable: Any,
 ) -> Tuple[Stats, PyTree]:
     _check_hilbert(vstate, Ô)
@@ -131,11 +136,12 @@ def expect_and_grad(  # noqa: F811
 
 
 # mixed state, non-hermitian operator
-@dispatch
+@expect_and_grad.dispatch
 def expect_and_grad(  # noqa: F811
     vstate: MCState,
     Ô: DiscreteOperator,
     use_covariance: FalseT,
+    *,
     mutable: Any,
 ) -> Tuple[Stats, PyTree]:
     _check_hilbert(vstate, Ô)

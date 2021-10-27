@@ -14,7 +14,7 @@
 
 import warnings
 from functools import partial
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union, Tuple
 
 import numpy as np
 
@@ -26,13 +26,15 @@ from flax import serialization
 
 from netket import jax as nkjax
 from netket import nn
+from netket.operator import AbstractOperator
+from netket.stats import Stats
 from netket.sampler import Sampler, SamplerState
 from netket.utils import maybe_wrap_module, deprecated, warn_deprecation, mpi, wrap_afun
 from netket.utils.types import PyTree, SeedT, NNInitFunc
 from netket.optimizer import LinearOperator
 from netket.optimizer.qgt import QGTAuto
 
-from .base import VariationalState
+from .base import VariationalState, expect, expect_and_grad
 
 AFunType = Callable[[nn.Module, PyTree, jnp.ndarray], jnp.ndarray]
 ATrainFunType = Callable[
@@ -40,11 +42,21 @@ ATrainFunType = Callable[
 ]
 
 
-def compute_chain_length(n_chains, n_samples):
+def compute_chain_length(n_chains, n_samples, minibatch_size=None):
     if n_samples <= 0:
         raise ValueError("Invalid number of samples: n_samples={}".format(n_samples))
 
     chain_length = int(np.ceil(n_samples / n_chains))
+
+    if minibatch_size is not None:
+        n_chains_per_rank = n_chains // mpi.n_nodes
+
+        n_minibatches = int(
+            np.ceil((chain_length * n_chains_per_rank) / minibatch_size)
+        )
+        samples_per_rank = n_minibatches * minibatch_size
+        chain_length = int(samples_per_rank // n_chains_per_rank)
+
     return chain_length
 
 
@@ -87,6 +99,8 @@ class MCState(VariationalState):
     """The function used to initialise the parameters and model_state"""
     _apply_fun: Callable = None
     """The function used to evaluate the model"""
+
+    _minibatch_size: Optional[int] = None
 
     def __init__(
         self,
@@ -275,7 +289,9 @@ class MCState(VariationalState):
 
     @n_samples.setter
     def n_samples(self, n_samples: int):
-        chain_length = compute_chain_length(self.sampler.n_chains, n_samples)
+        chain_length = compute_chain_length(
+            self.sampler.n_chains, n_samples, minibatch_size=self.minibatch_size
+        )
 
         n_samples_per_node = chain_length * self.sampler.n_chains_per_rank
         n_samples = chain_length * self.sampler.n_chains
@@ -288,7 +304,7 @@ class MCState(VariationalState):
     @property
     def n_samples_per_rank(self) -> int:
         """The number of samples generated on one MPI rank at every sampling step."""
-        return self._chain_length * mpi.n_nodes
+        return self._n_samples_per_node
 
     @n_samples_per_rank.setter
     def n_samples_per_rank(self, n_samples_per_rank: int) -> int:
@@ -360,6 +376,33 @@ class MCState(VariationalState):
             "Please update your code to use `n_discard_per_chain`."
         )
         self.n_discard_per_chain = val
+
+    @property
+    def minibatch_size(self) -> int:
+        return self._minibatch_size
+
+    @minibatch_size.setter
+    def minibatch_size(self, minibatch_size: int):
+        # disable minibatches if it is None
+        if minibatch_size is None:
+            self._minibatch_size = None
+            return
+
+        do_warn = False
+
+        self._minibatch_size = minibatch_size
+
+        # force recomputation
+        old_chain_length = self._chain_length
+        self.chain_length = self.chain_length
+
+        if (do_warn or old_chain_length != self.chain_length) and mpi.rank == 0:
+            warnings.warn(
+                "`minibatch_size` must be a multiple of `n_chains` and a divisor of "
+                "`chain_length`.\n"
+                f"Setting `minibatch_size={minibatch_size}, chain_length={self.chain_length} "
+                f"(n_chains_per_rank={self.sampler.n_chains_per_rank}, n_samples={self.n_samples})."
+            )
 
     def reset(self):
         """
@@ -443,6 +486,53 @@ class MCState(VariationalState):
         """
         return jit_evaluate(self._apply_fun, self.variables, σ)
 
+    # override to use minibatches
+    def expect(self, Ô: AbstractOperator) -> Stats:
+        r"""Estimates the quantum expectation value for a given operator O.
+            In the case of a pure state $\psi$, this is $<O>= <Psi|O|Psi>/<Psi|Psi>$
+            otherwise for a mixed state $\rho$, this is $<O> = \Tr[\rho \hat{O}/\Tr[\rho]$.
+
+        Args:
+            Ô: the operator O.
+
+        Returns:
+            An estimation of the quantum expectation value <O>.
+        """
+        return expect(self, Ô, self.minibatch_size)
+
+    # override to use minibatches
+    def expect_and_grad(
+        self,
+        Ô: AbstractOperator,
+        *,
+        mutable: Optional[Any] = None,
+        use_covariance: Optional[bool] = None,
+    ) -> Tuple[Stats, PyTree]:
+        r"""Estimates both the gradient of the quantum expectation value of a given operator O.
+
+        Args:
+            Ô: the operator Ô for which we compute the expectation value and it's gradient
+            mutable: Can be bool, str, or list. Specifies which collections in the model_state should
+                     be treated as  mutable: bool: all/no collections are mutable. str: The name of a
+                     single mutable  collection. list: A list of names of mutable collections.
+                     This is used to mutate the state of the model while you train it (for example
+                     to implement BatchNorm. Consult
+                     `Flax's Module.apply documentation <https://flax.readthedocs.io/en/latest/_modules/flax/linen/module.html#Module.apply>`_
+                     for a more in-depth exaplanation).
+            is_hermitian: optional override for whever to use or not the hermitian logic. By default
+                          it's automatically detected.
+
+        Returns:
+            An estimation of the quantum expectation value <O>.
+            An estimation of the average gradient of the quantum expectation value <O>.
+        """
+        if mutable is None:
+            mutable = self.mutable
+
+        return expect_and_grad(
+            self, Ô, use_covariance, self.minibatch_size, mutable=mutable
+        )
+
     @deprecated("Use MCState.log_value(σ) instead.")
     def evaluate(self, σ: jnp.ndarray) -> jnp.ndarray:
         """
@@ -492,8 +582,6 @@ class MCState(VariationalState):
 
 
 # serialization
-
-
 def serialize_MCState(vstate):
     state_dict = {
         "variables": serialization.to_state_dict(vstate.variables),

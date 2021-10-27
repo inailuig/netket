@@ -17,7 +17,9 @@ from .mc_state import MCState
 from .mc_mixed_state import MCMixedState
 
 from . import mc_expect
+from . import mc_expect_batch
 from . import mc_expect_grad
+from . import mc_expect_grad_batch
 
 from . import experimental
 
