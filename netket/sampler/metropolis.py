@@ -130,6 +130,8 @@ class MetropolisSamplerState(SamplerState):
 
     σ: jnp.ndarray
     """Current batch of configurations in the markov chain."""
+    log_psi: jnp.ndarray
+    """TODO"""
     rng: jnp.ndarray
     """State of the random number generator (key, in jax terms)."""
     rule_state: Optional[Any]
@@ -268,8 +270,11 @@ class MetropolisSampler(Sampler):
         σ = jnp.zeros(
             (sampler.n_chains_per_rank, sampler.hilbert.size), dtype=sampler.dtype
         )
+        log_psi = jnp.zeros((sampler.n_chains_per_rank,), dtype=sampler.dtype)
 
-        state = MetropolisSamplerState(σ=σ, rng=key_state, rule_state=rule_state)
+        state = MetropolisSamplerState(
+            σ=σ, log_psi=log_psi, rng=key_state, rule_state=rule_state
+        )
 
         # If we don't reset the chain at every sampling iteration, then reset it
         # now.
@@ -300,7 +305,8 @@ class MetropolisSampler(Sampler):
         with loops.Scope() as s:
             s.key = rng
             s.σ = state.σ
-            s.log_prob = sampler.machine_pow * machine.apply(parameters, state.σ).real
+            s.log_psi = machine.apply(parameters, state.σ)
+            s.log_prob = sampler.machine_pow * s.log_psi.real
 
             # for logging
             s.accepted = state.n_accepted_proc
@@ -312,9 +318,9 @@ class MetropolisSampler(Sampler):
                 σp, log_prob_correction = sampler.rule.transition(
                     sampler, machine, parameters, state, key1, s.σ
                 )
-                proposal_log_prob = (
-                    sampler.machine_pow * machine.apply(parameters, σp).real
-                )
+
+                proposal_log_psi = machine.apply(parameters, σp)
+                proposal_log_prob = sampler.machine_pow * proposal_log_psi.real
 
                 uniform = jax.random.uniform(key2, shape=(sampler.n_chains_per_rank,))
                 if log_prob_correction is not None:
@@ -328,19 +334,20 @@ class MetropolisSampler(Sampler):
                 s.σ = jnp.where(do_accept.reshape(-1, 1), σp, s.σ)
                 s.accepted += do_accept.sum()
 
-                s.log_prob = jax.numpy.where(
-                    do_accept.reshape(-1), proposal_log_prob, s.log_prob
-                )
+                do_accept = do_accept.reshape(-1)
+                s.log_psi = jax.numpy.where(do_accept, proposal_log_psi, s.log_psi)
+                s.log_prob = jax.numpy.where(do_accept, proposal_log_prob, s.log_prob)
 
             new_state = state.replace(
                 rng=new_rng,
                 σ=s.σ,
+                log_psi=s.log_psi,
                 n_accepted_proc=s.accepted,
                 n_steps_proc=state.n_steps_proc
                 + sampler.n_sweeps * sampler.n_chains_per_rank,
             )
 
-        return new_state, new_state.σ
+        return new_state, (new_state.σ, new_state.log_psi)
 
     def __repr__(sampler):
         return (

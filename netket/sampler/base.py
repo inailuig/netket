@@ -479,6 +479,9 @@ def _sample_chain(
     """
     _sample_next = lambda state, _: sampler.sample_next(machine, parameters, state)
 
+    log_psi = machine.apply(parameters, state.σ)
+    state = state.replace(log_psi=log_psi)
+
     state, samples = jax.lax.scan(
         _sample_next,
         state,
