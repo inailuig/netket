@@ -134,9 +134,9 @@ class MetropolisSamplerState(SamplerState):
     """State of the random number generator (key, in jax terms)."""
     rule_state: Optional[Any]
     """Optional state of a transition rule."""
-    n_steps_proc: int = 0
+    n_steps_proc: jnp.ndarray = jnp.array(0, dtype=jnp.int64)
     """Number of moves performed along the chains in this process since the last reset."""
-    n_accepted_proc: int = 0
+    n_accepted_proc: int = jnp.array(0, dtype=jnp.int64)
     """Number of accepted transitions among the chains in this process since the last reset."""
 
     @property
@@ -336,8 +336,10 @@ class MetropolisSampler(Sampler):
                 rng=new_rng,
                 σ=s.σ,
                 n_accepted_proc=s.accepted,
-                n_steps_proc=state.n_steps_proc
-                + sampler.n_sweeps * sampler.n_chains_per_rank,
+                n_steps_proc=jnp.array(
+                    state.n_steps_proc + sampler.n_sweeps * sampler.n_chains_per_rank,
+                    dtype=jnp.int64,
+                ),
             )
 
         return new_state, new_state.σ
