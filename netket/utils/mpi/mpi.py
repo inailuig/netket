@@ -23,8 +23,36 @@ _mpi4py_loaded = False
 _mpi4jax_loaded = False
 mpi4jax_available = False
 
+
+
+def _is_truthy(str_val):
+    return str_val.lower() in ("true", "1", "on")
+
+def _is_falsy(str_val):
+    return str_val.lower() in ("false", "0", "off")
+
+use_mpi_behaviour = os.getenv("NETKET_USE_MPI", "")
+
+if _is_truthy(use_mpi_behaviour):
+    use_mpi = True
+elif _is_falsy(use_mpi_behaviour):
+    use_mpi = False
+else:
+    use_mpi = False
+
+    warn_msg = (
+        "Not using MPI. "
+        "If you want to use MPI set NETKET_USE_MPI=1."
+        "To silence this warning, set NETKET_USE_MPI=0."
+    )
+    warnings.warn(warn_msg)
+
+
 try:
-    from mpi4py import MPI
+    if use_mpi:
+        from mpi4py import MPI
+    else:
+        raise ImportError
 
     _mpi4py_loaded = True
     mpi4py_available = True
