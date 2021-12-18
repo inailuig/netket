@@ -91,7 +91,7 @@ target_include_directories(optional_lite
 ################################################################################
 if (NOT EXISTS "${CMAKE_BINARY_DIR}/External/span-lite/nonstd/span.hpp")
     file(DOWNLOAD
-        "https://github.com/martinmoene/span-lite/releases/download/v0.5.0/span.hpp"
+        "https://github.com/martinmoene/span-lite/releases/download/v0.10.3/span.hpp"
         "External/span-lite/nonstd/span.hpp")
 endif()
 add_library(span_lite INTERFACE)
