@@ -1,76 +1,92 @@
 from typing import Callable, Optional
 
 import jax
-import jax.numpy as jnp
-
-from ._chunk_utils import _chunk, _unchunk
-from ._scanmap import scanmap, scan_append
+from jax import custom_batching
 
 
-def _chunk_vmapped_function(vmapped_fun, chunk_size, argnums=0):
-    """takes a vmapped function and computes it in chunks"""
+def tree_split(mask, tree):
+    lhs = jax.tree_map(lambda l, x: x if l else None, mask, tree)
+    rhs = jax.tree_map(lambda l, x: None if l else x, mask, tree)
+    return lhs, rhs
 
-    if chunk_size is None:
-        return vmapped_fun
 
-    if isinstance(argnums, int):
-        argnums = (argnums,)
+def tree_merge(mask, lhs_tree, rhs_tree):
+    return jax.tree_map(lambda l, x_l, x_r: x_l if l else x_r, mask, lhs_tree, rhs_tree)
 
-    def _fun(*args):
 
-        n_elements = jax.tree_leaves(args[argnums[0]])[0].shape[0]
-        n_chunks, n_rest = divmod(n_elements, chunk_size)
+def batched_vmap(f, batch_size, fun_is_already_vectorised=False):
 
-        if n_chunks == 0 or chunk_size >= n_elements:
-            y = vmapped_fun(*args)
-        else:
-            # split inputs
-            def _get_chunks(x):
-                x_chunks = jax.tree_map(lambda x_: x_[: n_elements - n_rest, ...], x)
-                x_chunks = _chunk(x_chunks, chunk_size)
-                return x_chunks
+    f_orig = f
+    f = custom_batching.custom_vmap(f)
 
-            def _get_rest(x):
-                x_rest = jax.tree_map(lambda x_: x_[n_elements - n_rest :, ...], x)
-                return x_rest
+    @f.def_vmap
+    def rule(axis_size, in_batched, *args):
+        # del axis_size
 
-            args_chunks = [
-                _get_chunks(a) if i in argnums else a for i, a in enumerate(args)
-            ]
-            args_rest = [
-                _get_rest(a) if i in argnums else a for i, a in enumerate(args)
-            ]
+        mapped_args, bcast_args = tree_split(in_batched, list(args))
 
-            y_chunks = _unchunk(
-                scanmap(vmapped_fun, scan_append, argnums)(*args_chunks)
+        def to_map(mapped_args):
+            args = tree_merge(in_batched, mapped_args, bcast_args)
+            return f_orig(*args)
+
+        if not fun_is_already_vectorised:
+            to_map = jax.vmap(to_map)
+
+        # TODO for simplicity we do padding to the next multiple
+        # TODO special case axis_size < batch_size
+        # TODO split & do remainder at end
+        n_batches, n_rest = divmod(axis_size, batch_size)
+
+        if n_rest != 0:
+
+            def _pad(x):
+                pad_width = ((0, batch_size - n_rest),) + ((0, 0),) * (x.ndim - 1)
+                return jax.numpy.pad(x, pad_width, mode="wrap")
+
+            mapped_args = jax.tree_map(_pad, mapped_args)
+
+        def _batch(x):
+            return x.reshape(
+                (
+                    -1,
+                    batch_size,
+                )
+                + x.shape[1:]
             )
 
-            if n_rest == 0:
-                y = y_chunks
-            else:
-                y_rest = vmapped_fun(*args_rest)
-                y = jax.tree_map(
-                    lambda y1, y2: jnp.concatenate((y1, y2)), y_chunks, y_rest
-                )
-        return y
+        out_shape = jax.eval_shape(to_map, mapped_args)
+        # this contains a somewhat ugly workaround to figure out which is the correct out_axis
+        # since the function might add new axes at the beginnig and so we don't know which one to merge with
+        # TODO any ideas?
+        def _unbatch(x, expected):
+            s1 = expected.shape
+            s2 = x.shape[1:]
+            different = np.where(np.array(s1) != np.array(s2))
+            assert len(different) == 1
+            axis = int(different[0]) + 1
+            x = jnp.moveaxis(x, axis, 1)
+            return x.reshape((-1,) + x.shape[2:])
 
-    return _fun
+        out = jax.tree_multimap(
+            _unbatch, jax.lax.map(to_map, jax.tree_map(_batch, mapped_args)), out_shape
+        )
+
+        if n_rest != 0:
+            out = jax.tree_map(lambda x: x[:axis_size], out)
+
+        out_batched = jax.tree_map(lambda _: True, out)
+        return [out], [out_batched]
+
+    return f
 
 
-def vmap_chunked(f: Callable, in_axes=0, *, chunk_size: Optional[int]):
+def vmap_chunked(f, *args, **kwargs):
     """
-    Behaves like jax.vmap but uses scan to chunk the computations in smaller chunks.
+    Behaves like jax.vmap but uses a custom vmap to chunk the computations in smaller chunks.
     """
-    if isinstance(in_axes, int):
-        in_axes = (in_axes,)
-
-    if not set(in_axes).issubset((0, None)):
-        raise NotImplementedError("Only in_axes 0/None are currently supported")
-
-    argnums = tuple(
-        map(lambda ix: ix[0], filter(lambda ix: ix[1] is not None, enumerate(in_axes)))
-    )
-
-    vmapped_fun = jax.vmap(f, in_axes=in_axes)
-
-    return _chunk_vmapped_function(vmapped_fun, chunk_size, argnums)
+    chunk_size = kwargs.pop("chunk_size")
+    if chunk_size is None:
+        return jax.vmap(f, *args, **kwargs)
+    else:
+        f = batched_vmap(f, chunk_size)
+        return jax.vmap(f, *args, **kwargs)
