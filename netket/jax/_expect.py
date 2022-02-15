@@ -53,7 +53,7 @@ def _expect(n_chains, log_pdf, expected_fun, pars, σ, *expected_fun_args):
     if n_chains is not None:
         L_σ = L_σ.reshape((n_chains, -1))
 
-    L̄_σ = mpi_statistics(L_σ.T)
+    L̄_σ, _ = mpi_statistics(L_σ.T)
     # L̄_σ = L_σ.mean(axis=0)
 
     return L̄_σ.mean, L̄_σ
@@ -66,7 +66,7 @@ def _expect_fwd(n_chains, log_pdf, expected_fun, pars, σ, *expected_fun_args):
     else:
         L_σ_r = L_σ
 
-    L̄_stat = mpi_statistics(L_σ_r.T)
+    L̄_stat, _ = mpi_statistics(L_σ_r.T)
 
     L̄_σ = L̄_stat.mean
     # L̄_σ = L_σ.mean(axis=0)
@@ -89,7 +89,7 @@ def _expect_bwd(n_chains, log_pdf, expected_fun, residuals, dout):
         log_p = log_pdf(pars, σ)
         term1 = jax.vmap(jnp.multiply)(ΔL_σ, log_p)
         term2 = expected_fun(pars, σ, *cost_args)
-        out = mpi_mean(term1 + term2, axis=0)
+        out, _ = mpi_mean(term1 + term2, axis=0)
         out = out.sum()
         return out
 

@@ -26,6 +26,7 @@ import numpy as np
 
 from netket import jax as nkjax
 from netket.utils import config
+from netket.utils.mpi import MPI_jax_comm
 
 from . import mean as _mean
 from . import var as _var
@@ -108,23 +109,25 @@ def _get_blocks(data, block_size):
     return data[:, 0 : n_blocks * block_size].reshape((-1, block_size)).mean(axis=1)
 
 
-def _block_variance(data, l):
+def _block_variance(data, l, *, token=None, comm=MPI_jax_comm):
     blocks = _get_blocks(data, l)
     ts = _total_size(blocks)
     if ts > 0:
-        return _var(blocks), ts
+        res, token = _var(blocks, token=token, comm=comm)
+        return res, ts, token
     else:
-        return jnp.nan, 0
+        return jnp.nan, 0, token
 
 
-def _batch_variance(data):
+def _batch_variance(data, *, token=None, comm=MPI_jax_comm):
     b_means = data.mean(axis=1)
     ts = _total_size(b_means)
-    return _var(b_means), ts
+    res, token = _var(b_means, token=token, comm=MPI_jax_comm)
+    return res, ts, token
 
 
 # this is not batch_size maybe?
-def statistics(data, batch_size=32):
+def statistics(data, batch_size=32, *, token=None):
     r"""
     Returns statistics of a given array (or matrix, see below) containing a stream of data.
     This is particularly useful to analyze Markov Chain data, but it can be used
@@ -156,11 +159,13 @@ def statistics(data, batch_size=32):
              Gelman et al., `Bayesian Data Analysis <http://www.stat.columbia.edu/~gelman/book/>`_,
              or Vehtari et al., `arXiv:1903.08008 <https://arxiv.org/abs/1903.08008>`_.)
     """
-    return _statistics(data, batch_size)
+    return _statistics(data, batch_size, token=token)
 
 
-@partial(jax.jit, static_argnums=1)
-def _statistics(data, batch_size):
+# TODO figure out a way to thread the MPI communicator throught jit
+# (after all it should just be a pointer, right?)
+@partial(jax.jit, static_argnames=('batch_size'))
+def _statistics(data, batch_size, *, token=None):
     data = jnp.atleast_1d(data)
     if data.ndim == 1:
         data = data.reshape((1, -1))
@@ -168,18 +173,18 @@ def _statistics(data, batch_size):
     if data.ndim > 2:
         raise NotImplementedError("Statistics are implemented only for ndim<=2")
 
-    mean = _mean(data)
-    variance = _var(data)
+    mean, token = _mean(data, token=token)
+    variance, token = _var(data, token=token)
 
     ts = _total_size(data)
 
     bare_var = variance
 
-    batch_var, n_batches = _batch_variance(data)
+    batch_var, n_batches, token = _batch_variance(data, token=token)
 
     l_block = max(1, data.shape[1] // batch_size)
 
-    block_var, n_blocks = _block_variance(data, l_block)
+    block_var, n_blocks, token = _block_variance(data, l_block, token=token)
 
     tau_batch = ((ts / n_batches) * batch_var / bare_var - 1) * 0.5
     tau_block = ((ts / n_blocks) * block_var / bare_var - 1) * 0.5
@@ -258,7 +263,7 @@ def _statistics(data, batch_size):
 
         # V_loc = _np.var(data, axis=-1, ddof=0)
         # W_loc = _np.mean(V_loc)
-        # W = _mean(W_loc)
+        # W, token = _mean(W_loc, token=token, comm=comm)
         # # This approximation seems to hold well enough for larger n_samples
         W = variance
 
@@ -268,5 +273,5 @@ def _statistics(data, batch_size):
 
     res = Stats(mean, error_of_mean, variance, tau_corr, R_hat)
 
-    return res
+    return res, token
     ##
