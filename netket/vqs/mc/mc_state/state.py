@@ -248,7 +248,8 @@ class MCState(VariationalState):
             self.init(seed, dtype=sampler.dtype)
 
         if sampler_seed is None and seed is not None:
-            key, key2 = jax.random.split(nkjax.PRNGKey(seed), 2)
+            rng_key, _ = nkjax.PRNGKey(seed)
+            key, key2 = jax.random.split(rng_key, 2)
             sampler_seed = key2
 
         self._sampler_seed = sampler_seed
@@ -276,7 +277,7 @@ class MCState(VariationalState):
         if dtype is None:
             dtype = self.sampler.dtype
 
-        key = nkjax.PRNGKey(seed)
+        key, _ = nkjax.PRNGKey(seed)
 
         dummy_input = jnp.zeros((1, self.hilbert.size), dtype=dtype)
 
@@ -312,7 +313,7 @@ class MCState(VariationalState):
             n_samples_old = self.n_samples
 
         self._sampler = sampler
-        self.sampler_state = self.sampler.init_state(
+        self.sampler_state, _ = self.sampler.init_state(
             self.model, self.variables, seed=self._sampler_seed
         )
 

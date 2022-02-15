@@ -91,14 +91,13 @@ class MCMixedState(VariationalMixedState, MCState):
                 Useful for example when you have a batchnorm layer that constructs the average/mean only during training.
 
         """
-
-        seed, seed_diag = jax.random.split(nkjax.PRNGKey(seed))
+        rng_key, _ = nkjax.PRNGKey(seed)
+        seed, seed_diag = jax.random.split(rng_key)
         if sampler_seed is None:
             sampler_seed_diag = None
         else:
-            sampler_seed, sampler_seed_diag = jax.random.split(
-                nkjax.PRNGKey(sampler_seed)
-            )
+            rng_key, _ = nkjax.PRNGKey(sampler_seed)
+            sampler_seed, sampler_seed_diag = jax.random.split(rng_key)
 
         self._diagonal = None
 

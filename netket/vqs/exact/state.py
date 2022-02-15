@@ -169,7 +169,7 @@ class ExactState(VariationalState):
         if dtype is None:
             dtype = float
 
-        key = nkjax.PRNGKey(seed)
+        key, _ = nkjax.PRNGKey(seed)
 
         dummy_input = jnp.zeros((1, self.hilbert.size), dtype=dtype)
 

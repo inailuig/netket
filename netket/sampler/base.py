@@ -26,6 +26,7 @@ from netket.utils.deprecation import deprecated
 from netket.utils.types import PyTree, DType, SeedT
 from netket.jax import HashablePartial
 from netket.utils import struct, numbers
+from netket.utils.mpi import MPI_jax_comm
 
 fancy = []
 
@@ -180,6 +181,7 @@ class Sampler(abc.ABC):
         machine: Union[Callable, nn.Module],
         parameters: PyTree,
         seed: Optional[SeedT] = None,
+        token = None,
     ) -> SamplerState:
         """
         Creates the structure holding the state of the sampler.
@@ -206,10 +208,10 @@ class Sampler(abc.ABC):
             The structure holding the state of the sampler. In general you should not expect
             it to be in a valid state, and should reset it before use.
         """
-        key = nkjax.PRNGKey(seed)
-        key = nkjax.mpi_split(key)
+        key, token = nkjax.PRNGKey(seed, token=token)
+        key, token = nkjax.mpi_split(key, token=token)
 
-        return sampler._init_state(wrap_afun(machine), parameters, key)
+        return sampler._init_state(wrap_afun(machine), parameters, key), token
 
     def reset(
         sampler,
@@ -231,7 +233,7 @@ class Sampler(abc.ABC):
             A valid sampler state.
         """
         if state is None:
-            state = sampler.init_state(machine, parameters)
+            state, _ = sampler.init_state(machine, parameters)
 
         return sampler._reset(wrap_afun(machine), parameters, state)
 

@@ -280,7 +280,7 @@ def compose(*funcs):
 
 
 def PRNGKey(
-    seed: Optional[SeedT] = None, *, root: int = 0, comm=MPI_jax_comm
+    seed: Optional[SeedT] = None, *, root: int = 0, token=None, comm=MPI_jax_comm
 ) -> PRNGKeyT:
     """
     Initialises a PRNGKey using an optional starting seed.
@@ -293,12 +293,15 @@ def PRNGKey(
     else:
         key = seed
 
-    key = jax.tree_map(lambda k: mpi.mpi_bcast_jax(k, root=root, comm=comm)[0], key)
+    key_flat, treedef = jax.tree_flatten(key)
+    for i, k in enumerate(key_flat):
+         key_flat[i], token = mpi.mpi_bcast_jax(k, root=root, token=token, comm=comm)
+    key = treedef.unflatten(key_flat)
 
-    return key
+    return key, token
 
 
-def mpi_split(key, *, root=0, comm=MPI_jax_comm) -> PRNGKeyT:
+def mpi_split(key, *, root=0, token=None, comm=MPI_jax_comm) -> PRNGKeyT:
     """
     Split a key across MPI nodes in the communicator.
     Only the input key on the root process matters.
@@ -316,9 +319,12 @@ def mpi_split(key, *, root=0, comm=MPI_jax_comm) -> PRNGKeyT:
     # on all MPI nodes?
     keys = jax.random.split(key, mpi.n_nodes)
 
-    keys = jax.tree_map(lambda k: mpi.mpi_bcast_jax(k, root=root)[0], keys)
+    keys_flat, treedef = jax.tree_flatten(keys)
+    for i, k in enumerate(keys_flat):
+         keys_flat[i], token = mpi.mpi_bcast_jax(k, root=root, token=token, comm=comm)
+    keys = treedef.unflatten(keys_flat)
 
-    return keys[mpi.rank]
+    return keys[mpi.rank], token
 
 
 class PRNGSeq:
@@ -328,9 +334,9 @@ class PRNGSeq:
 
     def __init__(self, base_key: Optional[SeedT] = None):
         if base_key is None:
-            base_key = PRNGKey()
+            base_key, _ = PRNGKey()
         elif isinstance(base_key, int):
-            base_key = PRNGKey(base_key)
+            base_key, _ = PRNGKey(base_key)
         self._current = base_key
 
     def __iter__(self):
