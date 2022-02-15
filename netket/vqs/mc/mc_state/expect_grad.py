@@ -125,7 +125,7 @@ def grad_expect_hermitian(
         local_value_args,
     )
 
-    Ō = statistics(O_loc.reshape(σ_shape[:-1]).T)
+    Ō, _ = statistics(O_loc.reshape(σ_shape[:-1]).T)
 
     O_loc -= Ō.mean
 

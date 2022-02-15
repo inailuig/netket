@@ -47,7 +47,7 @@ def tree_subtract_mean(oks: PyTree) -> PyTree:
     """
     subtract the mean with MPI along axis 0 of every leaf
     """
-    return jax.tree_map(partial(subtract_mean, axis=0), oks)  # MPI
+    return jax.tree_map(lambda x: subtract_mean(x, axis=0)[0], oks)  # MPI
 
 
 def jacobian_real_holo(
