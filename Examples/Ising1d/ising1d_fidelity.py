@@ -14,7 +14,7 @@
 
 import netket as nk
 
-from netket.driver.fidopt import Fidopt
+from netket.driver import Fidopt
 
 # 1D Lattice
 L = 16
