@@ -32,11 +32,11 @@ def _sq(x):
 
 
 def _Fest_and_Gest_logwf(
-    theta, logphi, logpsi, samplesphi, samplespsi, nonzero_wavefun, phi_samplesphi=None
+    theta, logphi, logpsi, samplesphi, samplespsi, nonzero_wavefun, logphi_samplesphi=None
 ):
     # logphi(s)
     # logpsi(theta, s)
-    if phi_samplesphi is None:
+    if logphi_samplesphi is None:
         logphi_samplesphi = logphi(samplesphi)
     logpsi_samplesphi, vjp_fun_G12 = jax.vjp(logpsi, theta, samplesphi)
     psi_over_phi_samplesphi = jax.numpy.exp(logpsi_samplesphi - logphi_samplesphi)

@@ -20,9 +20,9 @@ class Fidopt(AbstractVariationalDriver):
         sr=None,
         logfid=False,
         fidbatchsize=None,
-        nonzero_wavefun=False,
+        nonzero_wavefun=True,
         apply_fun_is_logwf=True,
-        reuse_target_samples=True,
+        reuse_target_samples=False,
         F_and_G_fun=Fest_and_Gest_nk_vs_batched,
     ):
 
@@ -44,9 +44,7 @@ class Fidopt(AbstractVariationalDriver):
         self._reuse_target_samples = (
             reuse_target_samples  # don't sample from target_variational_state again
         )
-        self._phi_samplesphi = (
-            None  # pass it if you already heave it so we don't need to recompute
-        )
+        self._phi_samplesphi = None
         self._F_and_G_fun = F_and_G_fun
 
     def _forward_and_backward(self):
@@ -59,10 +57,10 @@ class Fidopt(AbstractVariationalDriver):
                 or self._target_variational_state._samples is None
             ):
                 self._phi_samplesphi = batch(
-                    self._target_variational_state.evaluate(
+                    self._target_variational_state.log_value(
                         unbatch(self._target_variational_state.samples)
                     ),
-                    self._target_variational_state.samples.shape[0],
+                    self._target_variational_state.samples.shape[1],
                 )
 
         # this accesses variational_state.samples which we just generated
@@ -72,6 +70,7 @@ class Fidopt(AbstractVariationalDriver):
             self._logfid,
             self._nonzero_wavefun,
             self._apply_fun_is_logwf,
+            self._fidbatchsize,
             self._phi_samplesphi,
         )
 
