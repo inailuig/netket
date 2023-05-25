@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from functools import reduce
+from functools import partial, reduce
 from typing import Optional, Tuple, Callable
 
 import numpy as np
@@ -296,6 +296,7 @@ def compose(*funcs):
     return reduce(_compose, funcs)
 
 
+@partial(jax.jit, inline=True, static_argnames=('root', 'comm'))
 def PRNGKey(
     seed: Optional[SeedT] = None, *, root: int = 0, comm=MPI_jax_comm
 ) -> PRNGKeyT:
@@ -315,6 +316,7 @@ def PRNGKey(
     return key
 
 
+@partial(jax.jit, static_argnames=('root', 'comm'))
 def mpi_split(key, *, root=0, comm=MPI_jax_comm) -> PRNGKeyT:
     """
     Split a key across MPI nodes in the communicator.
