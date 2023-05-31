@@ -125,11 +125,16 @@ class QGTOnTheFlyT(LinearOperator):
     _chunking: bool = struct.field(pytree_node=False, default=False)
     """Whether the implementation with chunks is used which currently does not support vmapping over it"""
 
-    def __matmul__(self, y):
-        return onthefly_mat_treevec(self, y)
+    def __matmul__(self, y, token=None):
+        return onthefly_mat_treevec(self, y, token=token)
+
+    def __call__(self, vec, token=None):
+        return self.__matmul__(vec, token=token)
 
     def _solve(self, solve_fun, y: PyTree, *, x0: Optional[PyTree], **kwargs) -> PyTree:
-        return _solve(self, solve_fun, y, x0=x0)
+        token = jax.lax.create_token()
+        *res, token =  _solve(self, solve_fun, y, x0=x0, token=token)
+        return res
 
     def to_dense(self) -> jnp.ndarray:
         """
@@ -146,7 +151,7 @@ class QGTOnTheFlyT(LinearOperator):
 
 @jax.jit
 def onthefly_mat_treevec(
-    S: QGTOnTheFly, vec: Union[PyTree, jnp.ndarray]
+    S: QGTOnTheFly, vec: Union[PyTree, jnp.ndarray], token=None
 ) -> Union[PyTree, jnp.ndarray]:
     """
     Perform the lazy mat-vec product, where vec is either a tree with the same structure as
@@ -175,18 +180,17 @@ def onthefly_mat_treevec(
 
     vec = nkjax.tree_cast(vec, S._params)
 
-    res = S._mat_vec(vec, S.diag_shift)
+    res, token = S._mat_vec(vec, S.diag_shift, token=token)
 
     if ravel_result:
         res, _ = nkjax.tree_ravel(res)
 
-    return res
+    return res, token
 
 
 @jax.jit
 def _solve(
-    self: QGTOnTheFlyT, solve_fun, y: PyTree, *, x0: Optional[PyTree], **kwargs
-) -> PyTree:
+    self: QGTOnTheFlyT, solve_fun, y: PyTree, *, x0: Optional[PyTree], token=None) -> PyTree:
 
     check_valid_vector_type(self._params, y)
 
@@ -196,8 +200,8 @@ def _solve(
     if x0 is None:
         x0 = jax.tree_map(jnp.zeros_like, y)
 
-    out, info = solve_fun(self, y, x0=x0)
-    return out, info
+    out, info, token = solve_fun(self, y, x0=x0, token=token)
+    return out, info, token
 
 
 @jax.jit

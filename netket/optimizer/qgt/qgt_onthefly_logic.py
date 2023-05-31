@@ -38,7 +38,7 @@ from netket.jax import (
 # jitted; the arguments of mat_vec are outputs of jax.linearize, which are pytrees
 
 
-def _mat_vec(jvp_fn, v, diag_shift, pdf=None):
+def _mat_vec(jvp_fn, v, diag_shift, pdf=None, token=None):
     # Save linearisation work
     # TODO move to mat_vec_factory after jax v0.2.19
     vjp_fn = jax.linear_transpose(jvp_fn, v)
@@ -46,15 +46,16 @@ def _mat_vec(jvp_fn, v, diag_shift, pdf=None):
     w = jvp_fn(v)
     if pdf is None:
         w = w * (1.0 / (w.size * mpi.n_nodes))
-        w, _ = subtract_mean(w)  # w/ MPI
+        w, token = subtract_mean(w, token=token)  # w/ MPI
     else:
-        w = pdf * (w - mpi.mpi_sum_jax(pdf @ w)[0])
+        w_, token = mpi.mpi_sum_jax(pdf @ w, token=token)
+        w = pdf * (w - w_)
     # Oᴴw = (wᴴO)ᴴ = (w* O)* since 1D arrays are not transposed
     # vjp_fn packages output into a length-1 tuple
     (res,) = tree_conj(vjp_fn(w.conjugate()))
-    res = mpi.mpi_tree_map(mpi.mpi_sum_jax, res)[0]
+    res, token = mpi.mpi_tree_map(mpi.mpi_sum_jax, res, token=token)
 
-    return tree_axpy(diag_shift, v, res)  # res + diag_shift * v
+    return tree_axpy(diag_shift, v, res), token  # res + diag_shift * v
 
 
 @partial(jax.jit, static_argnums=0)
