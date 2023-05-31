@@ -338,7 +338,7 @@ class QSR(AbstractVariationalDriver):
 
         # result
         if return_stats:
-            return statistics(jnp.real(log_n - ce))
+            return statistics(jnp.real(log_n - ce))[0]
         return jnp.real(log_n - ce)
 
     def nll_whole_training_set(self, return_stats: Optional[bool] = True):
@@ -394,7 +394,7 @@ class QSR(AbstractVariationalDriver):
 
         # result
         if return_stats:
-            return statistics(jnp.real(log_n - ce))
+            return statistics(jnp.real(log_n - ce))[0]
         return jnp.real(log_n - ce)
 
     def entropy(
@@ -453,7 +453,7 @@ class QSR(AbstractVariationalDriver):
         """
         return statistics(
             self.nll(return_stats=False) - self.entropy(target_state, n_shots)
-        )
+        )[0]
 
     def KL_whole_training_set(
         self, target_state: Optional[Array] = None, n_shots: Optional[int] = None
@@ -475,7 +475,7 @@ class QSR(AbstractVariationalDriver):
         return statistics(
             self.nll_whole_training_set(return_stats=False)
             - self.entropy(target_state, n_shots)
-        )
+        )[0]
 
     def KL_exact(
         self, target_state: Optional[Array] = None, n_shots: Optional[int] = 1

@@ -179,7 +179,7 @@ class TDVPSchmitt(TDVPBaseDriver):
 
 @partial(jax.jit, static_argnames=("n_samples"))
 def _impl(parameters, n_samples, E_loc, S, rhs_coeff, num_tol, svd_tol, snr_tol):
-    E = stats.statistics(E_loc)
+    E, _ = stats.statistics(E_loc)
     ΔE_loc = E_loc.T.reshape(-1, 1) - E.mean
 
     stack_jacobian = S.mode == "complex"
