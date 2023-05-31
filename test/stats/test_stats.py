@@ -77,7 +77,7 @@ def _test_stats_mean_std(hi, ham, ma, n_chains):
     eloc = local_values(ma.apply, w, ham, samples)
     assert eloc.shape == (num_samples_per_chain, n_chains)
 
-    stats = statistics(eloc.T)
+    stats, _ = statistics(eloc.T)
 
     assert stats.mean == pytest.approx(np.mean(eloc))
     if n_chains > 1:
@@ -155,7 +155,7 @@ def test_tau_corr_fft_logic(batch_size, sig_corr):
         tau_fit_mean = 1 + 2 * tau_fit.mean()
         tau_fit_max = 1 + 2 * tau_fit.max()
 
-        stats = statistics(data)
+        stats, _ = statistics(data)
 
         assert np.mean(data) == pytest.approx(stats.mean)
         assert np.var(data) == pytest.approx(stats.variance)
@@ -169,7 +169,7 @@ def test_tau_corr_fft_logic(batch_size, sig_corr):
     with common.netket_experimental_fft_autocorrelation(False):
         tau_fit_m = tau_fit.mean()
 
-        stats = statistics(data)
+        stats, _ = statistics(data)
 
         assert np.mean(data) == pytest.approx(stats.mean)
         assert np.var(data) == pytest.approx(stats.variance)
@@ -207,7 +207,7 @@ def test_R_hat():
             [1.1, 1.1, 1.1],
         ]
     )
-    assert statistics(x).R_hat > 1.01
+    assert statistics(x)[0].R_hat > 1.01
 
     # detect non-stationary chains
     x = np.array(
@@ -216,7 +216,7 @@ def test_R_hat():
             [2.0, 1.5, 1.0],
         ]
     )
-    assert statistics(x).R_hat > 1.01
+    assert statistics(x)[0].R_hat > 1.01
 
     # detect "stuck" chains
     x = np.array(
@@ -226,7 +226,7 @@ def test_R_hat():
         ]
     )
     # not stuck -> good R_hat:
-    assert statistics(x).R_hat <= 1.01
+    assert statistics(x)[0].R_hat <= 1.01
     # stuck -> bad  R_hat:
     x[1, 100:] = 1.0
-    assert statistics(x).R_hat > 1.01
+    assert statistics(x)[0].R_hat > 1.01
