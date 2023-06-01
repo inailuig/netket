@@ -36,23 +36,23 @@ def _jvp(oks: PyTree, v: PyTree) -> Array:
     return jax.tree_util.tree_reduce(jnp.add, t)
 
 
-def _vjp(oks: PyTree, w: Array) -> PyTree:
+def _vjp(oks: PyTree, w: Array, token=None) -> PyTree:
     """
     Compute the vector-matrix product between the vector w and the pytree jacobian oks
     """
     res = jax.tree_map(partial(jnp.tensordot, w, axes=w.ndim), oks)
-    return mpi.mpi_tree_map(mpi.mpi_sum_jax, res)[0]  # MPI
+    return mpi.mpi_tree_map(mpi.mpi_sum_jax, res, token=token)  # MPI
 
 
-def _mat_vec(v: PyTree, oks: PyTree) -> PyTree:
+def _mat_vec(v: PyTree, oks: PyTree, token=None) -> PyTree:
     """
     Compute ⟨O† O⟩v = ∑ₗ ⟨Oₖᴴ Oₗ⟩ vₗ
     """
-    res = tree_conj(_vjp(oks, _jvp(oks, v).conjugate()))
-    return tree_cast(res, v)
+    res, token = _vjp(oks, _jvp(oks, v).conjugate(), token=token)
+    return tree_cast(tree_conj(res), v)
 
 
-def mat_vec(v: PyTree, centered_oks: PyTree, diag_shift: Scalar) -> PyTree:
+def mat_vec(v: PyTree, centered_oks: PyTree, diag_shift: Scalar, token=None) -> PyTree:
     """
     Compute (S + δ) v = 1/n ⟨ΔO† ΔO⟩v + δ v = ∑ₗ 1/n ⟨ΔOₖᴴΔOₗ⟩ vₗ + δ vₗ
 
@@ -67,4 +67,5 @@ def mat_vec(v: PyTree, centered_oks: PyTree, diag_shift: Scalar) -> PyTree:
     Returns:
         a pytree corresponding to the sr matrix-vector product (S + δ) v
     """
-    return tree_axpy(diag_shift, v, _mat_vec(v, centered_oks))
+    res, token = _mat_vec(v, centered_oks, token=token)
+    return tree_axpy(diag_shift, v, res), token

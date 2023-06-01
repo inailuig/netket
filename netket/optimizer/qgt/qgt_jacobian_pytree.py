@@ -194,10 +194,13 @@ class QGTJacobianPyTreeT(LinearOperator):
     """Internal flag used to signal that we are inside the _solve method and matmul should
     not take apart into real and complex parts the other vector"""
 
-    def __matmul__(self, vec: Union[PyTree, Array]) -> Union[PyTree, Array]:
-        return _matmul(self, vec)
+    def __matmul__(self, vec: Union[PyTree, Array], token=None) -> Union[PyTree, Array]:
+        return _matmul(self, vec, token=token)
 
-    def _solve(self, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None) -> PyTree:
+    def __call__(self, vec, token=None):
+        return self.__matmul__(vec, token=token)
+
+    def _solve(self, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None, token=Npne) -> PyTree:
         """
         Solve the linear system x=⟨S⟩⁻¹⟨y⟩ with the chosen iterative solver.
 
@@ -210,7 +213,9 @@ class QGTJacobianPyTreeT(LinearOperator):
             info: optional additional information provided by the solver. Might be
                 None if there are no additional information provided.
         """
-        return _solve(self, solve_fun, y, x0=x0)
+        token = jax.lax.create_token()
+        *res, token = _solve(self, solve_fun, y, x0=x0, token=token)
+        return res
 
     def to_dense(self) -> jnp.ndarray:
         """
@@ -269,7 +274,7 @@ def _matmul(
 
 @jax.jit
 def _solve(
-    self: QGTJacobianPyTreeT, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None
+    self: QGTJacobianPyTreeT, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None, token=None
 ) -> PyTree:
 
     check_valid_vector_type(self._params_structure, y)
@@ -291,7 +296,7 @@ def _solve(
     # mode=holomorphic to disable splitting the complex part
     unscaled_self = self.replace(scale=None, _in_solve=True)
 
-    out, info = solve_fun(unscaled_self, y, x0=x0)
+    out, info, token = solve_fun(unscaled_self, y, x0=x0, token=token)
 
     if self.scale is not None:
         out = jax.tree_map(jnp.divide, out, self.scale)
@@ -300,7 +305,7 @@ def _solve(
     if self.mode != "holomorphic":
         out = reassemble(out)
 
-    return out, info
+    return out, info, token
 
 
 @jax.jit
