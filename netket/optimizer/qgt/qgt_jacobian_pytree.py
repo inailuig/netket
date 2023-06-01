@@ -200,7 +200,7 @@ class QGTJacobianPyTreeT(LinearOperator):
     def __call__(self, vec, token=None):
         return self.__matmul__(vec, token=token)
 
-    def _solve(self, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None, token=Npne) -> PyTree:
+    def _solve(self, solve_fun, y: PyTree, *, x0: Optional[PyTree] = None, token=None) -> PyTree:
         """
         Solve the linear system x=⟨S⟩⁻¹⟨y⟩ with the chosen iterative solver.
 
@@ -236,7 +236,7 @@ class QGTJacobianPyTreeT(LinearOperator):
 
 @jax.jit
 def _matmul(
-    self: QGTJacobianPyTreeT, vec: Union[PyTree, Array]
+    self: QGTJacobianPyTreeT, vec: Union[PyTree, Array], token=None
 ) -> Union[PyTree, Array]:
     # Turn vector RHS into PyTree
     if hasattr(vec, "ndim"):
@@ -256,7 +256,7 @@ def _matmul(
     if self.scale is not None:
         vec = jax.tree_map(jnp.multiply, vec, self.scale)
 
-    result = mat_vec(vec, self.O, self.diag_shift)
+    result, token = mat_vec(vec, self.O, self.diag_shift, token=token)
 
     if self.scale is not None:
         result = jax.tree_map(jnp.multiply, result, self.scale)
@@ -269,7 +269,7 @@ def _matmul(
     if ravel:
         result, _ = nkjax.tree_ravel(result)
 
-    return result
+    return result, token
 
 
 @jax.jit

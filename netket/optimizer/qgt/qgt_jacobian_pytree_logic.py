@@ -49,7 +49,7 @@ def _mat_vec(v: PyTree, oks: PyTree, token=None) -> PyTree:
     Compute ⟨O† O⟩v = ∑ₗ ⟨Oₖᴴ Oₗ⟩ vₗ
     """
     res, token = _vjp(oks, _jvp(oks, v).conjugate(), token=token)
-    return tree_cast(tree_conj(res), v)
+    return tree_cast(tree_conj(res), v), token
 
 
 def mat_vec(v: PyTree, centered_oks: PyTree, diag_shift: Scalar, token=None) -> PyTree:
@@ -67,5 +67,6 @@ def mat_vec(v: PyTree, centered_oks: PyTree, diag_shift: Scalar, token=None) -> 
     Returns:
         a pytree corresponding to the sr matrix-vector product (S + δ) v
     """
+
     res, token = _mat_vec(v, centered_oks, token=token)
     return tree_axpy(diag_shift, v, res), token
