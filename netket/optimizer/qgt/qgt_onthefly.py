@@ -219,9 +219,9 @@ def _to_dense(self: QGTOnTheFlyT) -> jnp.ndarray:
         # the linear_call in mat_vec_chunked does currently not have a jax batching rule,
         # so it cannot be vmapped but we can use scan
         # which is better for reducing the memory consumption anyway
-        _, out = jax.lax.scan(lambda _, x: (None, self @ x), None, I)
+        _, out = jax.lax.scan(lambda _, x: (None, (self @ x)[0]), None, I)
     else:
-        out = jax.vmap(lambda x: self @ x, in_axes=0)(I)
+        out = jax.vmap(lambda x: (self @ x)[0], in_axes=0)(I)
 
     if jnp.iscomplexobj(out):
         out = out.T
