@@ -37,4 +37,4 @@ def mpi_tree_sum(x):
     m_T = _custom_transpose(inp_types, m_T)
     m.def_transpose(m_T)
     m_T.def_transpose(m)
-    return m((), a)
+    return m((), x)
