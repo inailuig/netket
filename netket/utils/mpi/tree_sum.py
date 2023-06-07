@@ -1,8 +1,6 @@
 # transposable version of mpi_tree_map(mpi.mpi_sum_jax, ...)
-# some parts are inspired by https://github.com/google/jax/issues/13298#issue-1453697688
-
 import jax
-from jax import custom_transpose
+from jax import custom_derivatives
 from . import mpi_tree_map, mpi_sum_jax
 
 class _custom_transpose:
@@ -27,14 +25,4 @@ def _mpi_tree_sum_transposed(_, x):
     return x
 
 def mpi_tree_sum(x):
-    m = _mpi_tree_sum
-    m_T = _mpi_tree_sum_transposed
-
-    out_types = jax.tree_map(lambda x: jax.core.get_aval(x).at_least_vspace(), m((), x))
-    inp_types = jax.tree_map(lambda x: jax.core.get_aval(x).at_least_vspace(), x)
-
-    m = _custom_transpose(out_types, m)
-    m_T = _custom_transpose(inp_types, m_T)
-    m.def_transpose(m_T)
-    m_T.def_transpose(m)
-    return m((), x)
+    return custom_derivatives.linear_call(_mpi_tree_allreduce_sum, _mpi_tree_allreduce_sum_transposed, (), x)
