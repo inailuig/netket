@@ -26,7 +26,6 @@ def _mpi_tree_sum(_, x):
 def _mpi_tree_sum_transposed(_, x):
     return x
 
-@jax.custom_batching.custom_vmap
 def mpi_tree_sum(x):
     m = _mpi_tree_sum
     m_T = _mpi_tree_sum_transposed
@@ -39,8 +38,3 @@ def mpi_tree_sum(x):
     m.def_transpose(m_T)
     m_T.def_transpose(m)
     return m((), x)
-
-@mpi_tree_sum.def_vmap
-def rule(axis_size, in_batched, xs):
-    xs_batched, = in_batched
-    return mpi_tree_sum(xs), xs_batched
