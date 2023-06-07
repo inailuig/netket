@@ -30,7 +30,7 @@ def _single_sample(forward_fn):
     """
     return lambda W, σ: forward_fn(W, σ[jnp.newaxis, :])[0]
 
-
+@partial(jax.vmap, in_axes=(None, None, 0))
 def jacobian_real_holo(forward_fn: Callable, params: PyTree, samples: Array) -> PyTree:
     """Calculates Jacobian entries by vmapping grad.
     Assumes the function is R→R or holomorphic C→C, so single grad is enough
@@ -48,7 +48,7 @@ def jacobian_real_holo(forward_fn: Callable, params: PyTree, samples: Array) -> 
     (res,) = vjp_fun(np.array(1.0, dtype=jnp.result_type(y)))
     return res
 
-
+@partial(jax.vmap, in_axes=(None, None, 0))
 def _jacobian_cplx(
     forward_fn: Callable,
     params: PyTree,

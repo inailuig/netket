@@ -98,9 +98,10 @@ def jacobian(
         center: a boolean specifying if the jacobian should be centered.
 
     """
-    if samples.ndim != 2:
-        raise ValueError("samples must be a 2D array")
-
+    #if samples.ndim != 2:
+    #    raise ValueError("samples must be a 2D array")
+    assert samples.ndim == 3
+    
     if model_state is None:
         model_state = {}
 

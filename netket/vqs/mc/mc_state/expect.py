@@ -59,6 +59,12 @@ def get_local_kernel_arguments(vstate: MCState, Ô: DiscreteOperator):  # noqa:
 
     σ = vstate.samples
     σp, mels = Ô.get_conn_padded(σ)
+    if isinstance(σ, jax.Array):
+        s = σ.sharding
+        if not isinstance(s, jax.sharding.SingleDeviceSharding):
+            assert s.shape[-1] == 1
+            σp = jax.device_put(σp, s.reshape(s.shape+(1,)))
+            mels = jax.device_put(mels, s)
     return σ, (σp, mels)
 
 

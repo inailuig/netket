@@ -65,16 +65,14 @@ def QGTOnTheFly(vstate=None, *, chunk_size=None, **kwargs) -> "QGTOnTheFlyT":
         samples = split_array_mpi(vstate._all_states)
         pdf = split_array_mpi(vstate.probability_distribution())
     else:
-        if jnp.ndim(vstate.samples) == 2:
-            samples = vstate.samples
-        else:
-            samples = vstate.samples.reshape((-1, vstate.samples.shape[-1]))
+        assert jnp.ndim(vstate.samples) == 3
         pdf = None
 
     if chunk_size is None and hasattr(vstate, "chunk_size"):
         chunk_size = vstate.chunk_size
 
-    n_samples = samples.shape[0]
+    samples = vstate.samples
+    n_samples = samples.shape[0]*samples.shape[1]
 
     if chunk_size is None or chunk_size >= n_samples:
         mv_factory = mat_vec_factory

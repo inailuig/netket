@@ -127,9 +127,9 @@ def QGTJacobianPyTree(
     shift, offset = to_shift_offset(diag_shift, diag_scale)
 
     jacobians = nkjax.jacobian(
-        vstate._apply_fun,
+        jax.vmap(vstate._apply_fun, in_axes=(None, 0)), # TODO hash
         vstate.parameters,
-        samples.reshape(-1, samples.shape[-1]),
+        samples,
         vstate.model_state,
         mode=mode,
         pdf=pdf,

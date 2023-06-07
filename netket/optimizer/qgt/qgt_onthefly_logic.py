@@ -81,8 +81,9 @@ def mat_vec_factory(forward_fn, params, model_state, samples, pdf=None):
     """
 
     # "forward function" that maps params to outputs
+    assert samples.ndim == 3
     def fun(W):
-        return forward_fn({"params": W, **model_state}, samples)
+        return jax.vmap(forward_fn, in_axes=(None, 0))({"params": W, **model_state}, samples)
 
     _, jvp_fn = jax.linearize(fun, params)
     return Partial(_mat_vec, jvp_fn, pdf=pdf)

@@ -46,6 +46,7 @@ def expect_and_forces(  # noqa: F811
 ) -> Tuple[Stats, PyTree]:
     σ, args = get_local_kernel_arguments(vstate, Ô)
 
+
     local_estimator_fun = get_local_kernel(vstate, Ô)
 
     Ō, Ō_grad, new_model_state = forces_expect_hermitian(
@@ -76,12 +77,11 @@ def forces_expect_hermitian(
 ) -> Tuple[PyTree, PyTree]:
 
     σ_shape = σ.shape
-    if jnp.ndim(σ) != 2:
-        σ = σ.reshape((-1, σ_shape[-1]))
+    assert jnp.ndim(σ) == 3
 
-    n_samples = σ.shape[0] * mpi.n_nodes
+    n_samples = σ.shape[0]*σ.shape[1] * mpi.n_nodes
 
-    O_loc = local_value_kernel(
+    O_loc = jax.vmap(local_value_kernel, in_axes=(None, None, 0,0))(
         model_apply_fun,
         {"params": parameters, **model_state},
         σ,
@@ -97,7 +97,7 @@ def forces_expect_hermitian(
     # mutable state (if it's there)
     is_mutable = mutable is not False
     _, vjp_fun, *new_model_state = nkjax.vjp(
-        lambda w: model_apply_fun({"params": w, **model_state}, σ, mutable=mutable),
+        lambda w: jax.vmap(partial(model_apply_fun, mutable=mutable), in_axes=(None, 0))({"params": w, **model_state}, σ),
         parameters,
         conjugate=True,
         has_aux=is_mutable,
