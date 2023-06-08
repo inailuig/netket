@@ -35,6 +35,9 @@ from .qgt_jacobian_common import (
 )
 
 
+def vmap_apply(f, p, x):
+    return jax.vmap(f, in_axes=(None, 0))(p,x)
+
 def QGTJacobianPyTree(
     vstate=None,
     *,
@@ -127,7 +130,7 @@ def QGTJacobianPyTree(
     shift, offset = to_shift_offset(diag_shift, diag_scale)
 
     jacobians = nkjax.jacobian(
-        jax.vmap(vstate._apply_fun, in_axes=(None, 0)), # TODO hash
+        nkjax.HashablePartial(vmap_apply, vstate._apply_fun),
         vstate.parameters,
         samples,
         vstate.model_state,
