@@ -116,8 +116,9 @@ def _Odagger_DeltaO_v(forward_fn, params, samples, v, pdf=None):
     w = _O_jvp(forward_fn, params, samples, v)
     if pdf is None:
         w = w * (1.0 / (samples.shape[0] * samples.shape[1] * mpi.n_nodes))
-        w_, chunk_fn = unchunk(w)
-        w = chunk_fn(subtract_mean(w_))  # w/ MPI
+        w_mean = w.sum(axis=(0,1), keepdims=True) / (samples.shape[0] * samples.shape[1] * mpi.n_nodes)
+        w_mean, _ = mpi.mpi_sum_jax(w_mean)
+        w = w - w_mean
     else:
         w_, chunk_fn = unchunk(w)
         # here we assume pdf is chunked,
