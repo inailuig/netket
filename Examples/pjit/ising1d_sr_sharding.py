@@ -1,4 +1,4 @@
-# %env XLA_PYTHON_CLIENT_MEM_FRACTION=.25
+# #%env XLA_PYTHON_CLIENT_MEM_FRACTION=.25
 # %env JAX_LOG_COMPILES=1
 
 # +
@@ -20,14 +20,19 @@ jax.devices()
 # +
 L = 32
 
-n_chains = 1024
+n_chains_per_device = 512
+
+n_discard = 0 # to be fair comparison we set discard to 0, as it's per chain
+# TODO later increase Ns and chains beyond what cuda can handle in paralell, and turn back on discard
 
 g = nk.graph.Hypercube(length=L, n_dim=1, pbc=True)
 hi = nk.hilbert.Spin(s=1 / 2, N=g.n_nodes)
 ha = nk.operator.Ising(hilbert=hi, graph=g, h=1.0)
 ma = nk.models.RBM(alpha=8, param_dtype=complex)
 #ma = nk.models.GCNN(g, features=8, layers=4, param_dtype=complex, mode='fft')
-sa = nk.sampler.MetropolisLocal(hi, n_chains=512)
+sa1 = nk.sampler.MetropolisLocal(hi, n_chains=n_chains_per_device)
+sa2 = nk.sampler.MetropolisLocal(hi, n_chains=n_chains_per_device*jax.local_device_count())
+
 op = nk.optimizer.Sgd(learning_rate=0.1)
 # -
 
@@ -35,12 +40,18 @@ sr = nk.optimizer.SR(diag_shift=0.01, qgt=nk.optimizer.qgt.QGTOnTheFly)
 srp = nk.optimizer.SR(diag_shift=0.01, qgt=partial(nk.optimizer.qgt.QGTJacobianPyTree, holomorphic=True))
 
 
+# we create 2 vstates:
+# - vs1 using 1 gpu
+# - vs2 using 2 local gpus
+#
+# note that so far this most likely only works with local devices, as we don't sync the PRNG for the non pjit stuff yet
+
 # +
-vs1 = nk.vqs.MCState(sa, ma, n_samples=8192, n_discard_per_chain=0)
+vs1 = nk.vqs.MCState(sa1, ma, n_samples=8192, n_discard_per_chain=n_discard)
 sampler_state1 =  vs1.sampler_state
 
 sharding = jax.sharding.PositionalSharding(jax.devices())
-vs2 = nk.vqs.MCState(sa, ma, n_samples=8192, n_discard_per_chain=0)
+vs2 = nk.vqs.MCState(sa2, ma, n_samples=8192, n_discard_per_chain=n_discard)
 sampler_state2 = vs2.sampler_state.replace(σ=jax.device_put(vs2.sampler_state.σ, sharding.reshape(-1, 1)))
 vs2.sampler_state = sampler_state2
 # 
@@ -77,24 +88,21 @@ def _sample_chain(sampler, machine, parameters, state, chain_length):
 
 
 
-x1 = jax.block_until_ready(_sample_chain(sa, ma, vs1.variables, sampler_state1, 128))
+x1 = jax.block_until_ready(_sample_chain(sa1, ma, vs1.variables, sampler_state1, 128))
 
-x2 = jax.block_until_ready(_sample_chain(sa, ma, vs2.variables, sampler_state2, 128))
+x2 = jax.block_until_ready(_sample_chain(sa2, ma, vs2.variables, sampler_state2, 128/jax.local_device_count()))
 
-# - absolutely terrible scaling
-# - need to investigate
+# %timeit _ = jax.block_until_ready(_sample_chain(sa1, ma, vs1.variables, sampler_state1, 128))
 
-# %timeit _ = jax.block_until_ready(_sample_chain(sa, ma, vs1.variables, sampler_state1, 128))
+# %timeit _ = jax.block_until_ready(_sample_chain(sa2, ma, vs2.variables, sampler_state2, 128/jax.local_device_count()))
 
-# %timeit _ = jax.block_until_ready(_sample_chain(sa, ma, vs2.variables, sampler_state2, 128))
-
-sap = netket.experimental.sampler.MetropolisSamplerPmap(hi, nk.sampler.rules.LocalRule(), n_chains=512)
+sap = netket.experimental.sampler.MetropolisSamplerPmap(hi, nk.sampler.rules.LocalRule(), n_chains=n_chains_per_device*jax.local_device_count())
 
 sampler_statep = sap.init_state(ma, vs1.variables)
 
-xp = jax.block_until_ready(_sample_chain(sap, ma, vs1.variables, sampler_statep, 128))
+xp = jax.block_until_ready(_sample_chain(sap, ma, vs1.variables, sampler_statep, 128/jax.local_device_count()))
 
-# %timeit _ = jax.block_until_ready(_sample_chain(sap, ma, vs1.variables, sampler_statep, 128))
+# %timeit _ = jax.block_until_ready(_sample_chain(sap, ma, vs1.variables, sampler_statep, 128/jax.local_device_count()))
 
 x1[0].shape, x2[0].shape, xp[0].shape
 
@@ -136,6 +144,8 @@ jax.tree_util.tree_leaves(S1._mat_vec)[0].sharding
 jax.tree_util.tree_leaves(S2._mat_vec)[0].sharding.shape
 
 
+# #### otf
+
 @jax.jit
 def mv(S, v):
     return S@v
@@ -143,8 +153,6 @@ def mv(S, v):
 
 _ = jax.block_until_ready(mv(S1, vs1.parameters))
 _ = jax.block_until_ready(mv(S1p, vs1.parameters))
-_ = jax.block_until_ready(mv(S2, vs2.parameters))
-_ = jax.block_until_ready(mv(S2p, vs2.parameters))
 
 # %timeit jax.block_until_ready(mv(S1, vs1.parameters))
 
@@ -216,12 +224,19 @@ _  =jax.block_until_ready(mv(S2p, vs2.parameters))
 # - pytree is faster
 
 # ### vmc
+#
+# #### pytree
 
 gs1 = nk.VMC(ha, op, variational_state=vs1, preconditioner=srp)
 gs2 = nk.VMC(ha, op, variational_state=vs2, preconditioner=srp)
 
+gs1.run(2)
+gs2.run(2)
+
 gs1.run(100)
 
 gs2.run(100)
+
+1.17 * 1.60 # speedup
 
 
