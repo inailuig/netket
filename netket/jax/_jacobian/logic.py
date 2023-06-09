@@ -147,10 +147,10 @@ def jacobian(
     )(f, params, samples)
 
     if pdf is None:
-        sqrt_n_samp = math.sqrt(samples.shape[0] * mpi.n_nodes)  # maintain weak type
+        sqrt_n_samp = math.sqrt(samples.shape[0] * samples.shape[1] * mpi.n_nodes)  # maintain weak type
         if center:
             jacobians = jax.tree_map(
-                lambda x: subtract_mean(x, axis=0) / sqrt_n_samp, jacobians
+                lambda x: subtract_mean(x, axis=(0,1)) / sqrt_n_samp, jacobians
             )
 
     else:
