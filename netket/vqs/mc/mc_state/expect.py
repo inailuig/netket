@@ -66,7 +66,7 @@ def get_local_kernel_arguments(vstate: MCState, Ô: DiscreteOperator):  # noqa:
         mels = jax.device_put(mels, x.device())
         return xp, mels
 
-    if isinstance(σ, jax.Array): # TODO skip if operator is in jax
+    if isinstance(σ, jax.Array) and not isinstance(σ.sharding, jax.sharding.SingleDeviceSharding): # TODO skip if operator is in jax
         # TODO make sure this works for weird sharding as well, in addition to our trivial one
         σp, mels = zip(*[_f(s.data) for s in σ.addressable_shards])
         σp = jax.make_array_from_single_device_arrays(σ.shape[:-1]+σp[0].shape[-2:], σ.sharding.reshape(σ.sharding.shape+(1,)), list(σp))
