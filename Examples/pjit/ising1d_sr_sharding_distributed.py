@@ -7,6 +7,15 @@ from functools import partial
 
 # TODO call with args if needed
 # jax.distributed.initialize()
+#jax.distributed.initialize(coordinator_address="172.16.3.101:51234",
+#                           num_processes=2,
+#                           process_id=0)
+#jax.distributed.initialize(coordinator_address="172.16.3.101:51234",
+#                           num_processes=2,
+#                           process_id=1)
+
+
+
 
 L = 32
 n_chains_per_device = 512
