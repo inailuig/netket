@@ -592,9 +592,11 @@ class MCState(VariationalState):
         if mutable is None:
             mutable = self.mutable
 
-        return expect_and_grad(
+        e, g =  expect_and_grad(
             self, Ô, use_covariance, self.chunk_size, mutable=mutable
         )
+        e = jax.tree_map(lambda x: x.addressable_data(0), e) # loss stats are shared array; make it local; TODO what is the proper way to do this?
+        return e,g
 
     # override to use chunks
     def expect_and_forces(
