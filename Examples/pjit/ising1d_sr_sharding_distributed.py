@@ -53,7 +53,7 @@ vs = nk.vqs.MCState(sa2, ma, n_samples=n_chains, n_discard_per_chain=n_discard)
 vs.chain_length = n_samples // n_chains
 
 # TODO here we assume every rank has different seed; split manually?
-vs.sampler_state = vs.sampler_state.replace(σ=put_global2(vs.smpler_state.σ))
+vs.sampler_state = vs.sampler_state.replace(σ=put_global2(vs.sampler_state.σ))
 # broadcast params from root
 vs.parameters = jax.experimental.multihost_utils.broadcast_one_to_all(vs.parameters)
 
