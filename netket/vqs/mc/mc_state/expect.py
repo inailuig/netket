@@ -58,13 +58,22 @@ def get_local_kernel_arguments(vstate: MCState, Ô: DiscreteOperator):  # noqa:
     check_hilbert(vstate.hilbert, Ô.hilbert)
 
     σ = vstate.samples
-    σp, mels = Ô.get_conn_padded(σ)
-    if isinstance(σ, jax.Array):
-        s = σ.sharding
-        if not isinstance(s, jax.sharding.SingleDeviceSharding):
-            assert s.shape[-1] == 1
-            σp = jax.device_put(σp, s.reshape(s.shape+(1,)))
-            mels = jax.device_put(mels, s)
+
+    def _f(x):
+        assert isinstance(x.sharding, jax.sharding.SingleDeviceSharding)
+        xp, mels = Ô.get_conn_padded(x)
+        xp = jax.device_put(xp, x.device())
+        mels = jax.device_put(mels, x.device())
+        return xp, mels
+
+    if isinstance(σ, jax.Array): # TODO skip if operator is in jax
+        # TODO make sure this works for weird sharding as well, in addition to our trivial one
+        σp, mels = zip(*[_f(s.data) for s in σ.addressable_shards])
+        σp = jax.make_array_from_single_device_arrays(σ.shape[:-1]+σp[0].shape[-2:], σ.sharding.reshape(σ.sharding.shape+(1,)), list(σp))
+        mels = jax.make_array_from_single_device_arrays(σ.shape[:-1]+mels[0].shape[-1:], σ.sharding, list(mels))
+    else:
+        σp, mels = Ô.get_conn_padded(σ)
+
     return σ, (σp, mels)
 
 
