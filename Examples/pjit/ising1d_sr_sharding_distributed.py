@@ -51,8 +51,8 @@ ma = nk.models.RBM(alpha=8, param_dtype=complex)
 # TODO iirc netket should already divide by the correct Ns everywhere, as the shape is global; check!
 sa2 = nk.sampler.MetropolisLocal(hi, n_chains=n_chains)
 op = nk.optimizer.Sgd(learning_rate=0.1)
-sr = nk.optimizer.SR(diag_shift=0.01, qgt=nk.optimizer.qgt.QGTOnTheFly)
-srp = nk.optimizer.SR(diag_shift=0.01, qgt=partial(nk.optimizer.qgt.QGTJacobianPyTree, holomorphic=True))
+sr = nk.optimizer.SR(diag_shift=0.01, qgt=nk.optimizer.qgt.QGTOnTheFly, solver=partial(jax.scipy.sparse.linalg.cg, tol=0, maxiter=100))
+srp = nk.optimizer.SR(diag_shift=0.01, qgt=partial(nk.optimizer.qgt.QGTJacobianPyTree, holomorphic=True), solver=partial(jax.scipy.sparse.linalg.cg, tol=0, maxiter=100))
 
 # we divide by jax.process_count() so that nk determines the correct chain length so that overall we get desired Ns
 # this is necessary as nk sees only the chains per rank; TODO fix it eventually
