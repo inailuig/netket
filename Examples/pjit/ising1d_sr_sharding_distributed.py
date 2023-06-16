@@ -6,7 +6,11 @@ from functools import partial
 
 
 # TODO call with args if needed
-# jax.distributed.initialize()
+jax.distributed.initialize()
+
+print(jax.process_index(), 'local', jax.local_devices())
+print(jax.process_index(), 'global', jax.devices())
+
 #jax.distributed.initialize(coordinator_address="172.16.3.101:51234",
 #                           num_processes=2,
 #                           process_id=0)
@@ -17,11 +21,12 @@ from functools import partial
 
 
 
-L = 32
+L = 40
 n_chains_per_device = 512
 n_chains = n_chains_per_device*jax.device_count()
 n_local_chains = n_chains_per_device*jax.local_device_count()
-n_samples = 16384
+#n_samples = 64*1024
+n_samples = 8192*jax.device_count()
 n_discard = 0 # to be fair comparison we set discard to 0, as it's per chain
 # TODO later increase Ns and chains beyond what cuda can handle in paralell, and turn back on discard
 
@@ -54,9 +59,6 @@ op = nk.optimizer.Sgd(learning_rate=0.1)
 sr = nk.optimizer.SR(diag_shift=0.01, qgt=nk.optimizer.qgt.QGTOnTheFly, solver=partial(jax.scipy.sparse.linalg.cg, tol=0, maxiter=100))
 srp = nk.optimizer.SR(diag_shift=0.01, qgt=partial(nk.optimizer.qgt.QGTJacobianPyTree, holomorphic=True), solver=partial(jax.scipy.sparse.linalg.cg, tol=0, maxiter=100))
 
-# we divide by jax.process_count() so that nk determines the correct chain length so that overall we get desired Ns
-# this is necessary as nk sees only the chains per rank; TODO fix it eventually
-
 # we set the chain length as it is for sure correct; eventually use netket
 vs = nk.vqs.MCState(sa2, ma, n_samples=n_chains, n_discard_per_chain=n_discard)
 vs.chain_length = n_samples // n_chains
@@ -67,6 +69,6 @@ vs.sampler_state = vs.sampler_state.replace(σ=put_global2(vs.sampler_state.σ))
 vs.parameters = jax.experimental.multihost_utils.broadcast_one_to_all(vs.parameters)
 
 gs = nk.VMC(ha, op, variational_state=vs, preconditioner=srp)
-gs.run(2)
-gs.run(100)
-
+gs.run(2, show_progress=(jax.process_index()==0))
+gs.run(100,show_progress=(jax.process_index()==0))
+jax.distributed.shutdown()
