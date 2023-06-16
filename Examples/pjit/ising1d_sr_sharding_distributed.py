@@ -1,4 +1,5 @@
 import jax
+import os
 jax.config.update('jax_threefry_partitionable', True)
 import netket as nk
 import jax.numpy as jnp
@@ -6,7 +7,11 @@ from functools import partial
 
 
 # TODO call with args if needed
-jax.distributed.initialize()
+#jax.distributed.initialize()
+
+# this is necessary to have jax find both local gpus
+ldi = list(map(int, os.environ.get('CUDA_VISIBLE_DEVICES').split(',')))
+jax.distributed.initialize(local_device_ids=ldi)
 
 print(jax.process_index(), 'local', jax.local_devices())
 print(jax.process_index(), 'global', jax.devices())
