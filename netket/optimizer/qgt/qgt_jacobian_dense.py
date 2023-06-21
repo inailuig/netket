@@ -108,6 +108,9 @@ def QGTJacobianDense(
         pdf = split_array_mpi(vstate.probability_distribution())
     else:
         samples = vstate.samples
+        if samples.ndim >=3:
+            # use jit so that we can do it on global shared array
+            samples = jax.jit(jax.lax.collapse, static_argnums=(1,2))(samples, 0, 2)
         pdf = None
 
     if mode is None:
@@ -124,10 +127,12 @@ def QGTJacobianDense(
 
     shift, offset = to_shift_offset(diag_shift, diag_scale)
 
+
+
     jacobians = nkjax.jacobian(
         vstate._apply_fun,
         vstate.parameters,
-        samples.reshape(-1, samples.shape[-1]),
+        samples,
         vstate.model_state,
         mode=mode,
         pdf=pdf,
