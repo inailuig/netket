@@ -276,3 +276,15 @@ config.define(
     ),
     runtime=True,
 )
+
+config.define(
+    "NETKET_EXPERIMENTAL_PJIT",
+    bool,
+    default=False,
+    help=dedent(
+        """
+        TODO
+        """
+    ),
+    runtime=False,
+)
