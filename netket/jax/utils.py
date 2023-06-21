@@ -312,7 +312,10 @@ def PRNGKey(
         key = seed
 
     if config.netket_experimental_pjit and jax.process_count() > 1:
-        key = jax.experimental.multihost_utils.broadcast_one_to_all(key)
+        # TODO jax.experimental.multihost_utils.broadcast_one_to_all changes the dtype from uint32 to uint64
+        # we cast back
+        # TODO open an issue and remove the cast once its resolved
+        key = jax.experimental.multihost_utils.broadcast_one_to_all(key).astype(key.dtype)
 
     key = jax.tree_map(lambda k: mpi.mpi_bcast_jax(k, root=root, comm=comm)[0], key)
 
