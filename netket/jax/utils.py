@@ -32,6 +32,7 @@ from netket.utils import random_seed, mpi
 from netket.utils.mpi import MPI_jax_comm
 from netket.utils.types import PyTree, PRNGKeyT, SeedT, Scalar
 from netket.utils.numbers import is_scalar
+from netket.utils.config_flags import config
 
 
 def tree_ravel(pytree: PyTree) -> Tuple[jnp.ndarray, Callable]:
@@ -304,7 +305,10 @@ def PRNGKey(
     The same seed will be distributed to all processes.
     """
     if seed is None:
-        key = jax.random.PRNGKey(random_seed())
+        seed = random_seed()
+        if config.netket_experimental_pjit and jax.process_count() > 1:
+            seed = jax.experimental.multihost_utils.broadcast_one_to_all(seed)
+        key = jax.random.PRNGKey(seed)
     elif isinstance(seed, int):
         key = jax.random.PRNGKey(seed)
     else:
