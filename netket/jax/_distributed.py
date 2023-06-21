@@ -5,12 +5,8 @@ from functools import partial, wraps
 def put_global(inp_data):
     # TODO rename
     # each rank has the whole thing; parts not belonging to it can be filled with garbage
-    # TODO avoid copying if local_array is already shared
-    global_shape = inp_data.shape
     sharding = jax.sharding.PositionalSharding(jax.devices()).reshape((-1,)+(1,)*(inp_data.ndim-1))
-    arrays = [jax.device_put(inp_data[index], d) for d, index in sharding.addressable_devices_indices_map(global_shape).items()]
-    return jax.make_array_from_single_device_arrays(global_shape, sharding, arrays)
-
+    return jax.jit(lambda x: x, out_shardings=sharding)(inp_data)
 
 
 # TODO put it somewhere
