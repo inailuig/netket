@@ -12,17 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
+from jax.config import config as jax_config
+
 # enable x64 on jax
 # must be done at startup.
-from jax.config import config
+jax_config.update("jax_enable_x64", True)
 
-config.update("jax_enable_x64", True)
-del config
+from .utils.config_flags import config
+
+if config.netket_experimental_pjit:
+    # enable jax_threefry_partitionable
+    # must be done at startup.
+    jax_config.update("jax_threefry_partitionable", True)
+
+del jax_config
 
 from ._version import version as __version__  # noqa: F401
 
 from . import utils
-from .utils import config
+
 
 from . import errors
 
