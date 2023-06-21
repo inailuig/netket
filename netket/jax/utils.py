@@ -32,6 +32,7 @@ from netket.utils import random_seed, mpi
 from netket.utils.mpi import MPI_jax_comm
 from netket.utils.types import PyTree, PRNGKeyT, SeedT, Scalar
 from netket.utils.numbers import is_scalar
+from netket.utils.config_flags import config
 
 
 def tree_ravel(pytree: PyTree) -> Tuple[jnp.ndarray, Callable]:
@@ -309,6 +310,9 @@ def PRNGKey(
         key = jax.random.PRNGKey(seed)
     else:
         key = seed
+
+    if config.netket_experimental_pjit and jax.process_count() > 1:
+        key = jax.experimental.multihost_utils.broadcast_one_to_all(key)
 
     key = jax.tree_map(lambda k: mpi.mpi_bcast_jax(k, root=root, comm=comm)[0], key)
 
