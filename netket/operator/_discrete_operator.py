@@ -10,61 +10,6 @@ from scipy.sparse import csr_matrix as _csr_matrix
 from netket.hilbert import DiscreteHilbert
 from netket.operator import AbstractOperator
 
-from functools import partial, wraps
-
-# TODO put it somewhere
-def _multimap(f, *args):
-    try:
-        return tuple(map(lambda a: f(*a), zip(*args)))
-    except TypeError:
-        return f(*args)
-
-def _make_array(old_shape, old_sharding, xs):
-    xs = list(xs)
-    # assumes all xs have same shape in all axes which are not shared
-    is_shared = tuple(a>1 for a in old_sharding.shape)
-    x0 = xs[0]
-    def _reshape(t, fill_value):
-        # extend/shorten the tuple to x0.ndim
-        return t[:x0.ndim] + (fill_value,)*(x0.ndim-len(t))
-    old_shape = _reshape(old_shape, None)
-    old_sharding_shape = _reshape(old_sharding.shape, None)
-    is_shared = _reshape(is_shared, False)
-    new_shape = _multimap(lambda c, t1, t2: t1 if c else t2, is_shared, old_shape, x0.shape)
-    new_sharding_shape = _multimap(lambda c, t: t if c else 1, is_shared, old_sharding_shape)
-    new_sharding = old_sharding.reshape(new_sharding_shape)
-    return jax.make_array_from_single_device_arrays(new_shape, new_sharding, xs)
-
-class _fake_list(list): pass # not a leave
-
-def _tree_transpose(list_of_trees):
-    return jax.tree_map(lambda *xs: _fake_list(xs), *list_of_trees)
-
-def _f(f, x):
-    if isinstance(x, jax.Array) and not isinstance(x.sharding, jax.sharding.SingleDeviceSharding):
-        # here we make a list so that below we can use tuple to find the leaves
-        y = _tree_transpose([jax.device_put(f(s.data), s.data.device()) for s in x.addressable_shards])
-        return jax.tree_map(partial(_make_array, x.shape, x.sharding), y)
-    else:
-        return f(x)
-
-
-def replicate_sharding(f):
-    # wrapper for a python function to act on a jax.Array, putting back the output with the infered sharding
-    # assumes only a single argument
-    # assumes the function acts element-wise on all shared axes (those with sharding.shape > 1)
-    # assumes no axes are inserted or deleted before the last shared axis
-    # does not yet support pytrees / multiple arguments for the input, but does support it for the output
-    return partial(_f, f)
-
-def replicate_sharding_cls(f):
-    @wraps(f)
-    def __f(self, x):
-        return partial(_f, partial(f, self))(x)
-    return __f
-
-
-
 
 class DiscreteOperator(AbstractOperator):
     r"""This class is the base class for operators defined on a
@@ -85,7 +30,6 @@ class DiscreteOperator(AbstractOperator):
         """The maximum number of non zero ⟨x|O|x'⟩ for every x."""
         raise NotImplementedError
 
-    @replicate_sharding_cls
     def get_conn_padded(self, x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         r"""Finds the connected elements of the Operator.
 

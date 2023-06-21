@@ -20,6 +20,7 @@ import numpy as np
 from jax import numpy as jnp
 
 from netket.utils import config, mpi, struct
+from netket.jax._distributed import extract_replicated # TODO; avoid cirular import
 
 from . import mean as _mean
 from . import var as _var
@@ -49,13 +50,6 @@ _NaN = float("NaN")
 def _maybe_item(x):
     if hasattr(x, "shape") and x.shape == ():
         return x.item()
-    else:
-        return x
-
-def _extract_replicated(x):
-    if isinstance(x, jax.Array) and not x.is_fully_addressable:
-        assert x.is_fully_replicated
-        return x.addressable_data(0)
     else:
         return x
 
@@ -114,7 +108,7 @@ class Stats:
         return "Mean", self.to_dict()
 
     def __repr__(self):
-        s = jax.tree_map(_extract_replicated, self)
+        s = extract_replicated(self)
         mean, err, var = _format_decimal(s.mean, s.error_of_mean, s.variance)
         if not math.isnan(s.R_hat):
             ext = f", R̂={s.R_hat:.4f}"
