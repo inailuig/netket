@@ -28,6 +28,8 @@ from netket.utils.types import PyTree
 from netket.utils.deprecation import deprecated
 from netket.utils import struct
 
+from netket.utils.config_flags import config
+
 from .base import Sampler, SamplerState
 from .rules import MetropolisRule
 
@@ -130,6 +132,14 @@ def _assert_good_log_prob_shape(log_prob, n_chains_per_rank, machine):
             )
         )
 
+def put_global2(inp_data):
+    # TODO rename
+    # each rank has the whole thing; parts not belonging to it can be filled with garbage
+    # TODO avoid copying if local_array is already shared
+    global_shape = inp_data.shape
+    sharding = jax.sharding.PositionalSharding(jax.devices()).reshape((-1,)+(1,)*(inp_data.ndim-1))
+    arrays = [jax.device_put(inp_data[index], d) for d, index in sharding.addressable_devices_indices_map(global_shape).items()]
+    return jax.make_array_from_single_device_arrays(global_shape, sharding, arrays)
 
 @struct.dataclass
 class MetropolisSampler(Sampler):
@@ -244,6 +254,8 @@ class MetropolisSampler(Sampler):
             (sampler.n_chains_per_rank, sampler.hilbert.size), dtype=sampler.dtype
         )
 
+        if config.netket_experimental_pjit and jax.device_count() > 1:
+            σ = put_global2(σ)
         state = MetropolisSamplerState(σ=σ, rng=key_state, rule_state=rule_state)
 
         # If we don't reset the chain at every sampling iteration, then reset it
@@ -251,6 +263,8 @@ class MetropolisSampler(Sampler):
         if not sampler.reset_chains:
             key_state, rng = jax.random.split(key_state)
             σ = sampler.rule.random_state(sampler, machine, params, state, rng)
+            if config.netket_experimental_pjit and jax.device_count() > 1:
+                σ = put_global2(σ)
             _assert_good_sample_shape(
                 σ,
                 (sampler.n_chains_per_rank, sampler.hilbert.size),
@@ -266,6 +280,8 @@ class MetropolisSampler(Sampler):
 
         if sampler.reset_chains:
             σ = sampler.rule.random_state(sampler, machine, parameters, state, rng)
+            if config.netket_experimental_pjit and jax.device_count() > 1:
+                σ = put_global2(σ)
             _assert_good_sample_shape(
                 σ,
                 (sampler.n_chains_per_rank, sampler.hilbert.size),
