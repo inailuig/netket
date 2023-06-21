@@ -38,7 +38,7 @@ from netket.jax import (
 # jitted; the arguments of mat_vec are outputs of jax.linearize, which are pytrees
 
 
-def _mat_vec(jvp_fn, v, diag_shift, pdf=None):
+def _mat_vec(jvp_fn, v, diag_shift, pdf=None, token=None):
     # Save linearisation work
     # TODO move to mat_vec_factory after jax v0.2.19
     vjp_fn = jax.linear_transpose(jvp_fn, v)
@@ -46,15 +46,16 @@ def _mat_vec(jvp_fn, v, diag_shift, pdf=None):
     w = jvp_fn(v)
     if pdf is None:
         w = w * (1.0 / (w.size * mpi.n_nodes))
-        w = subtract_mean(w)  # w/ MPI
+        w, token = subtract_mean(w, token=token)  # w/ MPI
     else:
-        w = pdf * (w - mpi.mpi_sum_jax(pdf @ w)[0])
+        w_, token = mpi.mpi_sum_jax(pdf @ w, token=token)
+        w = pdf * (w - w_)
     # Oᴴw = (wᴴO)ᴴ = (w* O)* since 1D arrays are not transposed
     # vjp_fn packages output into a length-1 tuple
     (res,) = tree_conj(vjp_fn(w.conjugate()))
-    res = jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)
+    res, token = mpi.mpi_tree_map(mpi.mpi_sum_jax, res, token=token)
 
-    return tree_axpy(diag_shift, v, res)  # res + diag_shift * v
+    return tree_axpy(diag_shift, v, res), token  # res + diag_shift * v
 
 
 @partial(jax.jit, static_argnums=0)
@@ -116,7 +117,7 @@ def _Odagger_DeltaO_v(forward_fn, params, samples, v, pdf=None):
     if pdf is None:
         w = w * (1.0 / (samples.shape[0] * samples.shape[1] * mpi.n_nodes))
         w_, chunk_fn = unchunk(w)
-        w = chunk_fn(subtract_mean(w_))  # w/ MPI
+        w = chunk_fn(subtract_mean(w_)[0])  # w/ MPI
     else:
         w_, chunk_fn = unchunk(w)
         # here we assume pdf is chunked,
@@ -125,7 +126,7 @@ def _Odagger_DeltaO_v(forward_fn, params, samples, v, pdf=None):
         w_ = pdf_ * (w_ - mpi.mpi_sum_jax(pdf_ @ w_)[0])
         w = chunk_fn(w_)
     res = _OH_w(forward_fn, params, samples, w)
-    return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # MPI
+    return mpi.mpi_tree_map(mpi.mpi_sum_jax, res)[0]  # MPI
 
 
 # @partial(jax.jit, static_argnums=1)
