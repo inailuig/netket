@@ -232,7 +232,7 @@ class AbstractVariationalDriver(abc.ABC):
             )
 
         # Log only non-root nodes
-        if self._mynode == 0:
+        if self._mynode == 0 and jax.process_index() == 0:
             # if out is a path, create an overwriting Json Log for output
             if isinstance(out, str):
                 loggers = (JsonLog(out, "w", save_params_every, write_every),)
