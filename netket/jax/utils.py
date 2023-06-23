@@ -305,17 +305,14 @@ def PRNGKey(
     The same seed will be distributed to all processes.
     """
     if seed is None:
-        key = jax.random.PRNGKey(random_seed())
+        seed = random_seed()
+        if config.netket_experimental_pjit and jax.process_count() > 1:
+            seed = jax.experimental.multihost_utils.broadcast_one_to_all(seed)
+        key = jax.random.PRNGKey(seed)
     elif isinstance(seed, int):
         key = jax.random.PRNGKey(seed)
     else:
         key = seed
-
-    if config.netket_experimental_pjit and jax.process_count() > 1:
-        # TODO jax.experimental.multihost_utils.broadcast_one_to_all changes the dtype from uint32 to uint64
-        # we cast back
-        # TODO open an issue and remove the cast once its resolved
-        key = jax.experimental.multihost_utils.broadcast_one_to_all(key).astype(key.dtype)
 
     key = mpi.mpi_tree_map(mpi.mpi_bcast_jax, key, root=root, comm=comm)[0]
 
