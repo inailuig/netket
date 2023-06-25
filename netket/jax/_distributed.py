@@ -2,11 +2,13 @@ import jax
 from functools import partial, wraps
 import numpy as np
 
+_identity = lambda x: x
+
 def put_global(inp_data):
     # TODO rename
     # each rank has the whole thing; parts not belonging to it can be filled with garbage
     sharding = jax.sharding.PositionalSharding(jax.devices()).reshape((-1,)+(1,)*(inp_data.ndim-1))
-    return jax.jit(lambda x: x, out_shardings=sharding)(inp_data)
+    return jax.jit(_identity, out_shardings=sharding)(inp_data)
 
 
 # TODO put it somewhere
