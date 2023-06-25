@@ -1,6 +1,6 @@
 import jax
 from functools import partial, wraps
-
+import numpy as np
 
 def put_global(inp_data):
     # TODO rename
@@ -32,6 +32,7 @@ def _make_array(old_shape, old_sharding, xs):
     new_sharding = old_sharding.reshape(new_sharding_shape)
     return jax.make_array_from_single_device_arrays(new_shape, new_sharding, xs)
 
+# TODO use jax._tree_transpose and is_leaf in the tree map instead
 class _fake_list(list): pass # not a leave
 
 def _tree_transpose(list_of_trees):
@@ -46,7 +47,9 @@ def _f(f, x):
         return f(x)
 
 
-def replicate_sharding(f):
+# do it by hand
+
+def replicate_sharding1(f):
     # wrapper for a python function to act on a jax.Array, putting back the output with the infered sharding
     # assumes only a single argument
     # assumes the function acts element-wise on all shared axes (those with sharding.shape > 1)
@@ -59,6 +62,34 @@ def replicate_sharding_cls(f):
     def __f(self, x):
         return partial(_f, partial(f, self))(x)
     return __f
+
+
+
+# simpler alternative using shmap and callback
+from jax.sharding import Mesh, PartitionSpec as P
+from jax.experimental.shard_map import shard_map
+
+@partial(jax.jit, static_argnums=0)
+def test(f, x):
+    # TODO how to get mesh and axes?
+    mesh = Mesh(jax.devices(), axis_names=('i'))
+    @partial(shard_map, mesh=mesh, in_specs=(P('i')), out_specs=P('i'))
+    def _test(x):
+        # here we do eval shape by hand
+        # TODO better way?
+        dummy_x = np.zeros((1,)*(x.ndim-1)+x.shape[-1:], x.dtype)
+        dummy_xp, dummy_mels = f(dummy_x)
+        xp_shape = jax.ShapeDtypeStruct(x.shape[:-1]+dummy_xp.shape[x.ndim-1:], dummy_xp.dtype)
+        mels_shape = jax.ShapeDtypeStruct(x.shape[:-1]+dummy_mels.shape[x.ndim-1:], dummy_mels.dtype)
+        result_shape = (xp_shape, mels_shape)
+        return jax.pure_callback(f, result_shape, x, vectorized=True)
+
+    return _test(x)
+
+def replicate_sharding_shmap(f):
+    return partial(test, f)
+
+replicate_sharding = replicate_sharding_shmap
 
 def _extract_replicated(x):
     if isinstance(x, jax.Array) and not x.is_fully_addressable:
