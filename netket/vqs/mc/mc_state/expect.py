@@ -21,6 +21,7 @@ from jax import numpy as jnp
 from netket.stats import Stats, statistics as mpi_statistics
 from netket.utils.types import PyTree
 from netket.utils.dispatch import dispatch
+from netket.jax import replicate_sharding
 
 from netket.operator import (
     AbstractOperator,
@@ -44,7 +45,7 @@ def get_local_kernel_arguments(vstate: MCState, Ô: Squared):  # noqa: F811
     check_hilbert(vstate.hilbert, Ô.hilbert)
 
     σ = vstate.samples
-    σp, mels = Ô.parent.get_conn_padded(σ)
+    σp, mels = replicate_sharding(Ô.parent.get_conn_padded)(σ)
     return σ, (σp, mels)
 
 
@@ -58,7 +59,7 @@ def get_local_kernel_arguments(vstate: MCState, Ô: DiscreteOperator):  # noqa:
     check_hilbert(vstate.hilbert, Ô.hilbert)
 
     σ = vstate.samples
-    σp, mels = Ô.get_conn_padded(σ)
+    σp, mels = replicate_sharding(Ô.get_conn_padded)(σ)
     return σ, (σp, mels)
 
 
