@@ -20,6 +20,7 @@ import numpy as np
 from jax import numpy as jnp
 
 from netket.utils import config, mpi, struct
+from netket.jax._distributed import extract_replicated # TODO; avoid cirular import
 
 from . import mean as _mean
 from . import var as _var
@@ -51,7 +52,6 @@ def _maybe_item(x):
         return x.item()
     else:
         return x
-
 
 @struct.dataclass
 class Stats:
@@ -108,14 +108,15 @@ class Stats:
         return "Mean", self.to_dict()
 
     def __repr__(self):
-        mean, err, var = _format_decimal(self.mean, self.error_of_mean, self.variance)
-        if not math.isnan(self.R_hat):
-            ext = f", R̂={self.R_hat:.4f}"
+        s = extract_replicated(self)
+        mean, err, var = _format_decimal(s.mean, s.error_of_mean, s.variance)
+        if not math.isnan(s.R_hat):
+            ext = f", R̂={s.R_hat:.4f}"
         else:
             ext = ""
         if config.netket_experimental_fft_autocorrelation:
-            if not (math.isnan(self.tau_corr) and math.isnan(self.tau_corr_max)):
-                ext += f", τ={self.tau_corr:.1f}<{self.tau_corr_max:.1f}"
+            if not (math.isnan(s.tau_corr) and math.isnan(s.tau_corr_max)):
+                ext += f", τ={s.tau_corr:.1f}<{s.tau_corr_max:.1f}"
         return f"{mean} ± {err} [σ²={var}{ext}]"
 
     # Alias accessors
