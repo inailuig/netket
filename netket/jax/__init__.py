@@ -49,6 +49,8 @@ from ._math import logsumexp_cplx
 
 from ._jacobian import jacobian, jacobian_default_mode
 
+from ._distributed import put_global, replicate_sharding, extract_replicated
+
 from netket.utils import _hide_submodules
 
 _hide_submodules(__name__)
