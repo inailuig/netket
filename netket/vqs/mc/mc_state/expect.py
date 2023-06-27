@@ -28,6 +28,7 @@ from netket.operator import (
     DiscreteOperator,
     Squared,
     ContinuousOperator,
+    JaxOperator
 )
 
 from netket.vqs.mc import (
@@ -81,6 +82,19 @@ def get_local_kernel_arguments(vstate: MCState, Ô: ContinuousOperator):  # noq
 def get_local_kernel(vstate: MCState, Ô: ContinuousOperator):  # noqa: F811
     # TODO: this should be moved other to dispatch in order to support MCMixedState
     return Ô._expect_kernel
+
+
+@dispatch
+def get_local_kernel(vstate: MCState, Ô: JaxOperator):  # noqa: F811
+    return kernels.local_value_kernel_jax_operator
+
+
+@dispatch
+def get_local_kernel_arguments(vstate: MCState, ha: JaxOperator):  # noqa: F811
+    check_hilbert(vstate.hilbert, ha.hilbert)
+    x = vstate.samples
+    op_kernel = ha.get_get_conn_padded_closure()
+    return x, op_kernel
 
 
 # Standard implementation of expect for an MCState (pure) and a generic operator

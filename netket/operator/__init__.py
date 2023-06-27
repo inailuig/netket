@@ -21,6 +21,8 @@ from ._pauli_strings import PauliStrings
 from ._lazy import Adjoint, Transpose, Squared
 from ._heisenberg import Heisenberg
 from ._ising import Ising
+from ._ising_jax import IsingJax
+from ._jax import JaxOperator
 from ._bose_hubbard import BoseHubbard
 
 from ._abstract_super_operator import AbstractSuperOperator

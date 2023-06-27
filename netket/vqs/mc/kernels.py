@@ -59,6 +59,10 @@ def local_value_kernel(logpsi: Callable, pars: PyTree, σ: Array, args: PyTree):
     return jnp.sum(mel * jnp.exp(logpsi(pars, σp) - logpsi(pars, σ)))
 
 
+def local_value_kernel_jax_operator(logpsi, parameters, x, op_kernel):
+    return local_value_kernel(logpsi, parameters, x, op_kernel(x))
+
+
 def local_value_squared_kernel(logpsi: Callable, pars: PyTree, σ: Array, args: PyTree):
     """
     local_value kernel for MCState and Squared (generic) operators
