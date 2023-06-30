@@ -236,7 +236,14 @@ config.define(
     default=False,
     help=dedent(
         """
-        TODO
+        Enables highly expermiental support of netket for running on multiple jax devices.
+
+        Supports both multiple local devices, as well as global ones in a multi-process environment.
+        See https://jax.readthedocs.io/en/latest/multi_process.html#initializing-the-cluster for
+        how to initialize the latter.
+        Distributes chains and samples equally among all available devices.
+
+        Hybrid parallelization with MPI is not supported, enabling NETKET_EXPERIMENTAL_PJIT disables mpi.
         """
     ),
     runtime=False,
