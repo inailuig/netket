@@ -37,7 +37,7 @@ class FermionOperator2nd(FermionOperator2ndBase):
             (
                 self._orb_idxs,
                 self._daggers,
-                self._weights,
+                self._numba_weights,
                 self._diag_idxs,
                 self._off_diag_idxs,
                 self._term_split_idxs,
@@ -56,7 +56,7 @@ class FermionOperator2nd(FermionOperator2ndBase):
         _max_conn_size = self.max_conn_size
         _orb_idxs = self._orb_idxs
         _daggers = self._daggers
-        _weights = self._weights
+        _weights = self._numba_weights
         _diag_idxs = self._diag_idxs
         _off_diag_idxs = self._off_diag_idxs
         _term_split_idxs = self._term_split_idxs
@@ -112,7 +112,7 @@ class FermionOperator2nd(FermionOperator2ndBase):
             self.max_conn_size,
             self._orb_idxs,
             self._daggers,
-            self._weights,
+            self._numba_weights,
             self._diag_idxs,
             self._off_diag_idxs,
             self._term_split_idxs,
