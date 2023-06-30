@@ -221,12 +221,14 @@ class FermionOperator2ndBase(DiscreteOperator):
         """The dtype of the operator's matrix elements ⟨σ|Ô|σ'⟩."""
         return self._dtype
 
-    def copy(self, *, dtype: Optional[DType] = None):
+    def copy(self, *, dtype: Optional[DType] = None, cls=None):
+        if cls is None:
+            cls = type(self)
         if dtype is None:
             dtype = self.dtype
         if not np.can_cast(self.dtype, dtype, casting="same_kind"):
             raise ValueError(f"Cannot cast {self.dtype} to {dtype}")
-        op = type(self)(self.hilbert, [], [], constant=self._constant, dtype=dtype)
+        op = cls(self.hilbert, [], [], constant=self._constant, dtype=dtype)
         # careful to make sure we propagate the correct dtype
         terms = copy.deepcopy(self._terms)
         weights = np.array(self._weights, dtype=dtype)
