@@ -13,9 +13,11 @@
 # limitations under the License.
 
 
-__all__ = ["FermionOperator2nd"]
+__all__ = ["FermionOperator2nd", "FermionOperator2ndJax"]
 
 from ._fermion_operator_2nd_numba import FermionOperator2nd
+from ._fermion_operator_2nd_jax import FermionOperator2ndJax
+
 from . import fermion
 
 from netket.utils import _auto_export
