@@ -121,10 +121,18 @@ def apply_terms(x, w, sites, daggers):
     return apply_term(x, w, sites, daggers)
 
 
-@partial(jax.jit, static_argnums=2)
-def get_conn_padded_jax(x, tl, max_conn_size):
+@partial(jax.jit, static_argnums=(0, 1))
+def get_conn_padded_jax(max_conn_size, dtype, tl, x):
+    # dtype arg is only needed for the empty case when there are no terms
+
+    if len(tl) == 0:
+        xp = x[..., None, :][..., :0, :]
+        mels = jnp.zeros(xp.shape[:-1], dtype=dtype)
+        n_conn = np.zeros(mels.shape, dtype=int)
+        return xp, mels, n_conn
 
     weight_dtype = tl[-1][0].dtype
+    assert weight_dtype == dtype
 
     xp_list = []
     mels_list = []
