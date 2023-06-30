@@ -91,7 +91,7 @@ def apply_term(x, w, sites, daggers):
     # but let's not rely on it)
 
     if len(sites) == 0:  # constant diagonal term
-        return x, jnp.full(x.shape[:-1], w)
+        return x, jnp.full(x.shape[:-1], w), jnp.full(x.shape[:-1], True)
 
     # TODO precomute all those masks, and pass them instead of the index?
 
@@ -161,10 +161,11 @@ def apply_term(x, w, sites, daggers):
     # here we cast, for the case when x is float64 but weights are float32
     # and jax would promote the result to float64
     w_final = w * (not_illegal * sgn).astype(w.dtype)
-    return x_final, w_final
+    # we assume w is not 0, otherwise we would have already removed it
+    return x_final, w_final, not_illegal
 
 
-@partial(jax.vmap, in_axes=(None, 0, 0, 0), out_axes=(-2, -1))
+@partial(jax.vmap, in_axes=(None, 0, 0, 0), out_axes=(-2, -1, -1))
 def apply_terms(x, w, sites, daggers):
     return apply_term(x, w, sites, daggers)
 
@@ -188,29 +189,34 @@ def get_conn_padded_jax(max_conn_size, dtype, tl_diag, tl_offdiag, x):
 
     xp_list = []
     mels_list = []
+    nonzero_mask_list = []
 
     # all terms in the diagonal have the same final state,
     # we sum the mels
     xp_diag_ = x[..., None, :]
     mel_diag_ = jnp.zeros(xp_diag_.shape[:-1], dtype=weight_dtype)
+    nonzero_mask_ = jnp.ones(mel_diag_.shape, dtype=jnp.bool_)
     if len(tl_diag) == 0:
         xp_diag_ = xp_diag_[..., :0, :]
         mel_diag_ = mel_diag_[..., :0]
+        nonzero_mask_ = nonzero_mask_[..., :0]
     else:
         # iterate over the different length terms (0, 2, 4, ...)
         for w, sites, daggers in tl_diag:
             # we trash xp, dce will make sure we don't even compute it
-            _, mels_ = apply_terms(x, w, sites, daggers)
+            _, mels_, _ = apply_terms(x, w, sites, daggers)
             mel_diag_ = mel_diag_ + mels_.sum(axis=-1, keepdims=True)
+    # TODO here we could check if the diagonal is < cutoff and set nonzero_mask_ to False
 
     xp_list.append(xp_diag_)
     mels_list.append(mel_diag_)
-
+    nonzero_mask_list.append(nonzero_mask_)
     # iterate over the different length terms (0, 2, 4, ...)
     for w, sites, daggers in tl_offdiag:
-        xp_, mels_ = apply_terms(x, w, sites, daggers)
+        xp_, mels_, nonzero_mask_ = apply_terms(x, w, sites, daggers)
         xp_list.append(xp_)
         mels_list.append(mels_)
+        nonzero_mask_list.append(nonzero_mask_)
 
     # pad with 0 and old state
     xp_list.append(x[..., None, :])
@@ -218,12 +224,13 @@ def get_conn_padded_jax(max_conn_size, dtype, tl_diag, tl_offdiag, x):
 
     xp_padded = jnp.concatenate(xp_list, axis=-2)
     mels_padded = jnp.concatenate(mels_list, axis=-1)
+    nonzero_mask = jnp.concatenate(nonzero_mask_list, axis=-1)
 
     # move the nonzeros to the beginning
 
-    n_nonzero = jnp.vectorize(jnp.count_nonzero, signature="(i)->()")(mels_padded)
-    _nonzero_fn = partial(jnp.nonzero, size=max_conn_size, fill_value=-1)
-    (i_nonzero,) = jnp.vectorize(_nonzero_fn, signature="(i)->(j)")(mels_padded)
+    n_nonzero = nonzero_mask.sum(axis=-1)
+    _nonzero_fn = partial(jnp.where, size=max_conn_size, fill_value=-1)
+    (i_nonzero,) = jnp.vectorize(_nonzero_fn, signature="(i)->(j)")(nonzero_mask)
     xp_u = jnp.take_along_axis(xp_padded, i_nonzero[..., None], axis=-2)
     mels_u = jnp.take_along_axis(mels_padded, i_nonzero, axis=-1)
 
@@ -232,6 +239,14 @@ def get_conn_padded_jax(max_conn_size, dtype, tl_diag, tl_offdiag, x):
     # you should check that n_nonzero <= max_conn_size outside of jit,
     # and increase max_conn_size if it's not
     return xp_u, mels_u, n_nonzero
+
+
+@partial(jax.jit, static_argnums=0)
+def n_conn_jax(dtype, tl_diag, tl_offdiag, x):
+    max_conn_size = 0
+    # let dce take care of not computing xp
+    _, _, n_conn = get_conn_padded_jax(max_conn_size, dtype, tl_diag, tl_offdiag, x)
+    return n_conn
 
 
 @register_pytree_node_class
@@ -332,3 +347,11 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
     def get_conn_padded(self, x):
         xp, mels, _ = self._get_conn_padded(x)
         return xp, mels
+
+    def n_conn(self, x):
+        return n_conn_jax(
+            self._dtype,
+            self._terms_list_diag,
+            self._terms_list_offdiag,
+            x,
+        )
