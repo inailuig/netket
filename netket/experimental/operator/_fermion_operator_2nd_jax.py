@@ -31,9 +31,8 @@ def _reverse_split_cast_term_part(term, site_dtype, dagger_dtype):
 
 
 def prepare_terms_list(
-    weights,
-    terms,
-    constant,
+    operators,
+    constant=None,
     site_dtype=np.uint32,
     dagger_dtype=np.int8,
     weight_dtype=jnp.float64,
@@ -41,7 +40,7 @@ def prepare_terms_list(
 ):
     # group the terms together with respect to the number of sites they act on
     terms_dicts = {}
-    for t, w in zip(terms, weights):
+    for t, w in operators.items():
         l = len(t)
         d = terms_dicts.get(l, {})
         d[t] = w
@@ -51,7 +50,7 @@ def prepare_terms_list(
         w = jnp.array(list(d.values()), dtype=weight_dtype)
         t = np.array(list(d.keys()), dtype=int)
         res.append((w, *_reverse_split_cast_term_part(t, site_dtype, dagger_dtype)))
-    if np.abs(constant) > cutoff:
+    if constant is not None and np.abs(constant) > cutoff:
         res.append(
             (
                 jnp.array(constant, dtype=weight_dtype).reshape((1,)),
@@ -63,7 +62,7 @@ def prepare_terms_list(
     return res
 
 
-@jax.jit
+@partial(jax.jit)
 def apply_term(x, w, sites, daggers):
     # sites and daggers need to have reversed order (hightest first!)
 
@@ -124,23 +123,44 @@ def apply_terms(x, w, sites, daggers):
 
 
 @partial(jax.jit, static_argnums=(0, 1))
-def get_conn_padded_jax(max_conn_size, dtype, tl, x):
+def get_conn_padded_jax(max_conn_size, dtype, tl_diag, tl_offdiag, x):
     # dtype arg is only needed for the empty case when there are no terms
 
-    if len(tl) == 0:
+    if len(tl_diag) == 0 and len(tl_offdiag) == 0:
         xp = x[..., None, :][..., :0, :]
         mels = jnp.zeros(xp.shape[:-1], dtype=dtype)
         n_conn = np.zeros(mels.shape, dtype=int)
         return xp, mels, n_conn
 
-    weight_dtype = tl[-1][0].dtype
-    assert weight_dtype == dtype
+    if len(tl_diag) > 0:
+        weight_dtype = tl_diag[-1][0].dtype
+        assert weight_dtype == dtype
+    if len(tl_offdiag) > 0:
+        weight_dtype = tl_offdiag[-1][0].dtype
+        assert weight_dtype == dtype
 
     xp_list = []
     mels_list = []
 
+    # all terms in the diagonal have the same final state,
+    # we sum the mels
+    xp_diag_ = x[..., None, :]
+    mel_diag_ = jnp.zeros(xp_diag_.shape[:-1], dtype=weight_dtype)
+    if len(tl_diag) == 0:
+        xp_diag_ = xp_diag_[..., :0, :]
+        mel_diag_ = mel_diag_[..., :0]
+    else:
+        # iterate over the different length terms (0, 2, 4, ...)
+        for w, sites, daggers in tl_diag:
+            # we trash xp, dce will make sure we don't even compute it
+            _, mels_ = apply_terms(x, w, sites, daggers)
+            mel_diag_ = mel_diag_ + mels_.sum(axis=-1, keepdims=True)
+
+    xp_list.append(xp_diag_)
+    mels_list.append(mel_diag_)
+
     # iterate over the different length terms (0, 2, 4, ...)
-    for w, sites, daggers in tl:
+    for w, sites, daggers in tl_offdiag:
         xp_, mels_ = apply_terms(x, w, sites, daggers)
         xp_list.append(xp_)
         mels_list.append(mels_)
@@ -180,31 +200,39 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
             # TODO ideally we would set dagger_dtype to the same as x
             # however, unfortunately, the dtype of the states in netket
             # is stored in the sampler and not in hilbert, so we don't know it at this stage
-            self._terms_list = prepare_terms_list(
-                self._weights,
-                self._terms,
+            diag_operators = {
+                k: v for k, v in self._operators.items() if _is_diag_term(k)
+            }
+            offdiag_operators = {
+                k: v for k, v in self._operators.items() if not _is_diag_term(k)
+            }
+
+            self._terms_list_diag = prepare_terms_list(
+                diag_operators,
                 self._constant,
                 site_dtype=np.uint32,
                 dagger_dtype=np.int8,
                 weight_dtype=self._dtype,
             )
+            self._terms_list_offdiag = prepare_terms_list(
+                offdiag_operators,
+                site_dtype=np.uint32,
+                dagger_dtype=np.int8,
+                weight_dtype=self._dtype,
+            )
 
-            self._max_conn_size = 0
-
-            have_const = 0 in [
-                sites.shape[-1] for w, sites, daggers in self._terms_list
-            ]
-            have_diag_terms = any([_is_diag_term(t) for t in self._terms])
-            if have_const or have_diag_terms:
-                self._max_conn_size += 1
-            # # the following could be reduced further
-            self._max_conn_size += sum([not _is_diag_term(t) for t in self._terms])
-
+            # TODO the following could be reduced further
+            self._max_conn_size = int(len(self._terms_list_diag) > 0) + len(
+                offdiag_operators
+            )
             self._initialized = True
 
     def tree_flatten(self):
         self._setup()
-        data = (self._terms_list,)
+        data = (
+            self._terms_list_diag,
+            self._terms_list_offdiag,
+        )
         metadata = {
             "hilbert": self.hilbert,
             "operators": self._operators,
@@ -222,7 +250,7 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
         op = cls(hi, [], [], constant=constant, dtype=dtype)
         op._operators = metadata["operators"]
         op._max_conn_size = metadata["max_conn_size"]
-        (op._terms_list,) = data
+        (op._terms_list_diag, op._terms_list_offdiag) = data
         op._initialized = True
         return op
 
@@ -238,7 +266,11 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
     def _get_conn_padded(self, x):
         self._setup()
         xp, mels, n_conn = get_conn_padded_jax(
-            self._max_conn_size, self._dtype, self._terms_list, x
+            self._max_conn_size,
+            self._dtype,
+            self._terms_list_diag,
+            self._terms_list_offdiag,
+            x,
         )
         # TODO if we are outside jit (i don't know how to detect it)
         # we coule check here that _max_conn_size was not too small
