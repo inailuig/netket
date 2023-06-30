@@ -51,6 +51,15 @@ class FermionOperator2nd(FermionOperator2ndBase):
 
             self._initialized = True
 
+    def to_jax_operator(self) -> "FermionOperator2ndJax":  # noqa: F821
+        """
+        Returns the jax version of this operator, which is an
+        instance of :class:`netket.experimental.operator.FermionOperator2ndJax`.
+        """
+        from ._fermion_operator_2nd_jax import FermionOperator2ndJax
+
+        return self.copy(cls=FermionOperator2ndJax)
+
     def _get_conn_flattened_closure(self):
         self._setup()
         _max_conn_size = self.max_conn_size
