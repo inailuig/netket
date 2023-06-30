@@ -23,11 +23,6 @@ from ._fermion_operator_2nd_base import FermionOperator2ndBase
 from ._fermion_operator_2nd_utils import _is_diag_term
 
 
-@partial(jax.vmap, in_axes=(None, 0, 0, 0), out_axes=(-2, -1))
-def apply_terms(x, w, sites, daggers):
-    return apply_term(x, w, sites, daggers)
-
-
 @partial(jax.vmap, in_axes=(0, None, None))
 def _reverse_split_cast_term_part(term, site_dtype, dagger_dtype):
     # splits sites and daggers out of terms, casts to desired dtype
@@ -75,18 +70,28 @@ def apply_term(x, w, sites, daggers):
     # sites can be an unsigned int
     # daggers and x need to be signed, preferably of the same type
 
-    # assert x.dtype == np.int8
-    # assert daggers.dtype == np.int8
-    # assert sites.dtype in (np.uint8, np.uint16, np.uint32, np.uint64)
+    if not jnp.issubdtype(x.dtype, jnp.signedinteger):
+        raise ValueError(f'x has incompatible type. expect a signed integer but got {x.dtype}')
+    if not jnp.issubdtype(daggers.dtype, jnp.signedinteger):
+        raise ValueError(f'daggers has incompatible type. expect a signed integer but got {daggers.dtype}')
+    if not jnp.issubdtype(sites.dtype, jnp.integer):
+        raise ValueError(f'sites has incompatible type. expect a integer but got {sites.dtype}')
+
+    # for daggers it's crucial its a signed int, we need it to go negative
+    # (we might be able to get away using underflow if we are careful not to cast,
+    # but let's not rely on it)
+
 
     if len(sites) == 0:  # constant diagonal term
         return x, jnp.full(x.shape[:-1], w)
 
     n_orbitals = x.shape[-1]
     fill_vec = jnp.arange(n_orbitals, dtype=sites.dtype)
-    masks_flip = jnp.eye(n_orbitals, dtype=x.dtype)[sites]
-    masks_sgn = (fill_vec[None] < sites[:, None]).astype(x.dtype)
-    daggers_pm = (daggers - (1 - daggers)).astype(x.dtype)
+    # ensure it's the same dtype as daggers
+    masks_flip = jnp.eye(n_orbitals, dtype=daggers.dtype)[sites]
+    masks_sgn = (fill_vec[None] < sites[:, None])
+    # be careful about type as daggers_pm can and will be negative
+    daggers_pm = (daggers - (1 - daggers))
     add_flip = masks_flip * daggers_pm[:, None]
     add_flip_padded = jnp.vstack([jnp.zeros_like(add_flip[..., 0, :]), add_flip])
     add_flip_cum = jnp.cumsum(add_flip_padded, axis=-2)
@@ -101,6 +106,11 @@ def apply_term(x, w, sites, daggers):
     d = xi != daggers[None]
     w_final = w * d.prod(axis=-1) * sgn
     return x_final, w_final
+
+
+@partial(jax.vmap, in_axes=(None, 0, 0, 0), out_axes=(-2, -1))
+def apply_terms(x, w, sites, daggers):
+    return apply_term(x, w, sites, daggers)
 
 
 @partial(jax.jit, static_argnums=2)
@@ -157,7 +167,7 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
                 self._terms,
                 self._constant,
                 site_dtype=np.uint32,
-                dagger_dtype=np.uint8,
+                dagger_dtype=np.int8,
                 weight_dtype=self._dtype,
             )
 
