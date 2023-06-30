@@ -21,7 +21,7 @@ from jax import numpy as jnp
 from netket.stats import Stats, statistics as mpi_statistics
 from netket.utils.types import PyTree
 from netket.utils.dispatch import dispatch
-from netket.jax import replicate_sharding
+from netket.jax.distributed import replicate_sharding
 
 from netket.operator import (
     AbstractOperator,

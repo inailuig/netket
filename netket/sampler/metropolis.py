@@ -30,7 +30,7 @@ from netket.utils import struct
 
 from netket.utils.config_flags import config
 
-from netket.jax import put_global
+from netket.jax.distributed import put_global
 
 from .base import Sampler, SamplerState
 from .rules import MetropolisRule
