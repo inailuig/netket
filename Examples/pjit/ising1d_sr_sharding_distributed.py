@@ -2,9 +2,9 @@ import jax
 import os
 
 
-# the default of distributed.initialize is to only use on gpu
+# the default of distributed.initialize is to only use one gpu
 # in practice its probably best to have one process per gpu
-# but test hybrid configurations we force it to use all CUDA_VISIBLE_DEVICES here
+# but to test hybrid configurations we force it to use all CUDA_VISIBLE_DEVICES here
 
 ldi = list(map(int, os.environ.get("CUDA_VISIBLE_DEVICES").split(",")))
 jax.distributed.initialize(local_device_ids=ldi)
