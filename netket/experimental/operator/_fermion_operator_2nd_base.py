@@ -228,8 +228,8 @@ class FermionOperator2ndBase(DiscreteOperator):
             raise ValueError(f"Cannot cast {self.dtype} to {dtype}")
         op = type(self)(self.hilbert, [], [], constant=self._constant, dtype=dtype)
         # careful to make sure we propagate the correct dtype
-        terms = copy.deepcopy(list(self._operators.keys()))
-        weights = np.array(list(self._operators.values()), dtype=dtype)
+        terms = copy.deepcopy(self._terms)
+        weights = np.array(self._weights, dtype=dtype)
         op._operators = dict(zip(terms, weights))
         return op
 
@@ -251,11 +251,19 @@ class FermionOperator2ndBase(DiscreteOperator):
         return self._max_conn_size
 
     @property
+    def _terms(self):
+        return list(self._operators.keys())
+
+    @property
+    def _weights(self):
+        return list(self._operators.values())
+
+    @property
     def is_hermitian(self) -> bool:
         """Returns true if this operator is hermitian."""
         if self._is_hermitian is None:  # only compute when needed, is expensive
-            terms = list(self._operators.keys())
-            weights = list(self._operators.values())
+            terms = self._terms
+            weights = self._weights
             self._is_hermitian = _check_hermitian(terms, weights)
         return self._is_hermitian
 
@@ -393,8 +401,8 @@ class FermionOperator2ndBase(DiscreteOperator):
     def conjugate(self, *, concrete=False):
         r"""Returns the complex conjugate of this operator."""
 
-        terms = list(self._operators.keys())
-        weights = list(self._operators.values())
+        terms = self._terms
+        weights = self._weights
         terms, weights = _herm_conj(terms, weights)  # changes also the terms
         terms = _make_tuple_tree(terms)
 
