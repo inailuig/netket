@@ -71,16 +71,24 @@ def apply_term(x, w, sites, daggers):
     # daggers and x need to be signed, preferably of the same type
 
     if not jnp.issubdtype(x.dtype, jnp.signedinteger):
-        raise ValueError(f'x has incompatible type. expect a signed integer but got {x.dtype}')
+        if jnp.issubdtype(x.dtype, jnp.floating):
+            pass  # allow float for the time being
+        else:
+            raise ValueError(
+                f"x has incompatible type. expect a signed integer but got {x.dtype}"
+            )
     if not jnp.issubdtype(daggers.dtype, jnp.signedinteger):
-        raise ValueError(f'daggers has incompatible type. expect a signed integer but got {daggers.dtype}')
+        raise ValueError(
+            f"daggers has incompatible type. expect a signed integer but got {daggers.dtype}"
+        )
     if not jnp.issubdtype(sites.dtype, jnp.integer):
-        raise ValueError(f'sites has incompatible type. expect a integer but got {sites.dtype}')
+        raise ValueError(
+            f"sites has incompatible type. expect a integer but got {sites.dtype}"
+        )
 
     # for daggers it's crucial its a signed int, we need it to go negative
     # (we might be able to get away using underflow if we are careful not to cast,
     # but let's not rely on it)
-
 
     if len(sites) == 0:  # constant diagonal term
         return x, jnp.full(x.shape[:-1], w)
@@ -89,9 +97,9 @@ def apply_term(x, w, sites, daggers):
     fill_vec = jnp.arange(n_orbitals, dtype=sites.dtype)
     # ensure it's the same dtype as daggers
     masks_flip = jnp.eye(n_orbitals, dtype=daggers.dtype)[sites]
-    masks_sgn = (fill_vec[None] < sites[:, None])
+    masks_sgn = fill_vec[None] < sites[:, None]
     # be careful about type as daggers_pm can and will be negative
-    daggers_pm = (daggers - (1 - daggers))
+    daggers_pm = daggers - (1 - daggers)
     add_flip = masks_flip * daggers_pm[:, None]
     add_flip_padded = jnp.vstack([jnp.zeros_like(add_flip[..., 0, :]), add_flip])
     add_flip_cum = jnp.cumsum(add_flip_padded, axis=-2)
