@@ -63,6 +63,7 @@ def prepare_terms_list(
 
 
 # TODO implement a version with indexing instead of masks
+# TODO implement a version which uses a fori loop to loop over sites
 @partial(jax.jit)
 def apply_term(x, w, sites, daggers):
     # sites and daggers need to have reversed order (hightest first!)
