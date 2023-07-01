@@ -62,10 +62,10 @@ def prepare_terms_list(
     return res
 
 
-# TODO implement a version with masks
-# TODO experiment with unroll
-@partial(jax.jit)
-def apply_term_scan(x, weight, sites, daggers):
+# TODO implement a version which replaces the logic with math,
+# maybe it can be faster to use float16 or float32
+@partial(jax.jit, static_argnums=4)
+def apply_term_scan(x, weight, sites, daggers, unroll=1):
     # sites and daggers need to have reversed order (hightest first!)
 
     # here we do jordan wigner:
@@ -98,7 +98,9 @@ def apply_term_scan(x, weight, sites, daggers):
 
         # compute sign from σᶻ (stored as 0/1 for +1/-1)
         mask_all_up_to_site = jnp.arange(n_orbitals, dtype=sites.dtype) < site
-        sgn = sgn ^ jax.lax.reduce(x_ & mask_all_up_to_site[None], False, lambda x, y: x  ^ y, (x_.ndim-1,))
+        sgn = sgn ^ jax.lax.reduce(
+            x_ & mask_all_up_to_site[None], False, lambda x, y: x ^ y, (x_.ndim - 1,)
+        )
 
         # check if we did σ⁺|1⟩=0 or σ⁻|0⟩=0
         zero = zero | (x_.at[..., site].get() == dagger)
@@ -106,26 +108,38 @@ def apply_term_scan(x, weight, sites, daggers):
         return (x_new, sgn, zero), None
 
     # scan over the sites
-    # TODO unroll?
-    (x_final, sgn, zero), _ = jax.lax.scan(f, init, xs)
+    (x_final, sgn, zero), _ = jax.lax.scan(f, init, xs, unroll=unroll)
 
     # compute the real value of the sign (map [0,1] ↦ [+1,-1])
-    sign = 1 - 2 * sgn.astype(w.dtype)
+    sign = 1 - 2 * sgn.astype(weight.dtype)
     # compute the final coefficient
     not_zero = ~zero
     w_final = weight * not_zero * sign
     # return the xp, the mel and wether mel is zero
     return x_final.astype(x.dtype), w_final, not_zero
 
-@partial(jax.vmap, in_axes=(None, 0, 0, 0), out_axes=(-2, -1, -1))
-def apply_terms_scan(x, w, sites, daggers):
-    return apply_term_scan(x, w, sites, daggers)
+
+@partial(jax.vmap, in_axes=(None, 0, 0, 0, None), out_axes=(-2, -1, -1))
+def _apply_terms_scan(x, w, sites, daggers, unroll):
+    return apply_term_scan(x, w, sites, daggers, unroll=unroll)
 
 
+@partial(jax.jit, static_argnums=4)
+def apply_terms_scan(x, w, sites, daggers, unroll=1):
+    return _apply_terms_scan(x, w, sites, daggers, unroll)
 
 
+# default to unroll=4, which means for chemistry we unroll everything
+# seems faster on gpu
 @partial(jax.jit, static_argnums=(0, 1, 5))
-def get_conn_padded_jax(max_conn_size, dtype, tl_diag, tl_offdiag, x, apply_terms_fun=apply_terms_scan):
+def get_conn_padded_jax(
+    max_conn_size,
+    dtype,
+    tl_diag,
+    tl_offdiag,
+    x,
+    apply_terms_fun=partial(apply_terms_scan, unroll=4),
+):
     # dtype arg is only needed for the empty case when there are no terms
 
     if len(tl_diag) == 0 and len(tl_offdiag) == 0:
@@ -195,11 +209,18 @@ def get_conn_padded_jax(max_conn_size, dtype, tl_diag, tl_offdiag, x, apply_term
     return xp_u, mels_u, n_nonzero
 
 
-@partial(jax.jit, static_argnums=0)
-def n_conn_jax(dtype, tl_diag, tl_offdiag, x):
+@partial(jax.jit, static_argnums=(0, 4))
+def n_conn_jax(dtype, tl_diag, tl_offdiag, x, apply_terms_fun=apply_terms_scan):
     max_conn_size = 0
     # let dce take care of not computing xp
-    _, _, n_conn = get_conn_padded_jax(max_conn_size, dtype, tl_diag, tl_offdiag, x)
+    _, _, n_conn = get_conn_padded_jax(
+        max_conn_size,
+        dtype,
+        tl_diag,
+        tl_offdiag,
+        x,
+        apply_terms_fun=partial(apply_terms_scan, unroll=4),
+    )
     return n_conn
 
 
