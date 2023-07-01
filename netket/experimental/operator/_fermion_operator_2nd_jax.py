@@ -170,9 +170,55 @@ def apply_term(x, w, sites, daggers):
 def apply_terms(x, w, sites, daggers):
     return apply_term(x, w, sites, daggers)
 
+@partial(jax.jit)
+def apply_term_scan(x, w, sites, daggers):
+    # sites and daggers need to have reversed order (hightest first!)
 
-@partial(jax.jit, static_argnums=(0, 1))
-def get_conn_padded_jax(max_conn_size, dtype, tl_diag, tl_offdiag, x):
+    if len(sites) == 0:  # constant diagonal term
+        return x, jnp.full(x.shape[:-1], w), jnp.full(x.shape[:-1], True)
+
+    x = x.astype(jnp.bool_)
+    assert daggers.dtype == jnp.bool_
+
+    n_orbitals = x.shape[-1]
+    ara = jnp.arange(n_orbitals, dtype=sites.dtype)
+
+    sgn = jnp.full(x.shape[:-1], False)
+    illegal = jnp.full(x.shape[:-1], False)
+    init = x, sgn, illegal
+    xs = sites, daggers
+
+    def f(carry, xs):
+        site, dagger = xs
+        x_, sgn, illegal = carry
+
+
+        x_new = x_.at[..., site].set(dagger)
+
+        mask_all_up_to_site = ara < site
+        sgn = sgn ^ jax.lax.reduce(x_ & mask_all_up_to_site[None], False, lambda x, y: x  ^ y, (x_.ndim-1,))
+
+        illegal = illegal | (x_.at[..., site].get() == dagger)
+
+        return (x_new, sgn, illegal), illegal
+
+    # TODO unroll?
+    (x_final, sgn, illegal), _ = jax.lax.scan(f, init, xs)
+
+    sign = 1 - 2 * sgn.astype(w.dtype)
+    not_illegal = ~illegal
+    w_final = w * not_illegal * sign
+    return x_final.astype(x.dtype), w_final, not_illegal
+
+@partial(jax.vmap, in_axes=(None, 0, 0, 0), out_axes=(-2, -1, -1))
+def apply_terms_scan(x, w, sites, daggers):
+    return apply_term_scan(x, w, sites, daggers)
+
+
+
+
+@partial(jax.jit, static_argnums=(0, 1, 5))
+def get_conn_padded_jax(max_conn_size, dtype, tl_diag, tl_offdiag, x, apply_terms_fun=apply_terms_scan):
     # dtype arg is only needed for the empty case when there are no terms
 
     if len(tl_diag) == 0 and len(tl_offdiag) == 0:
@@ -205,7 +251,7 @@ def get_conn_padded_jax(max_conn_size, dtype, tl_diag, tl_offdiag, x):
         # iterate over the different length terms (0, 2, 4, ...)
         for w, sites, daggers in tl_diag:
             # we trash xp, dce will make sure we don't even compute it
-            _, mels_, _ = apply_terms(x, w, sites, daggers)
+            _, mels_, _ = apply_terms_fun(x, w, sites, daggers)
             mel_diag_ = mel_diag_ + mels_.sum(axis=-1, keepdims=True)
     # TODO here we could check if the diagonal is < cutoff and set nonzero_mask_ to False
 
@@ -214,7 +260,7 @@ def get_conn_padded_jax(max_conn_size, dtype, tl_diag, tl_offdiag, x):
     nonzero_mask_list.append(nonzero_mask_)
     # iterate over the different length terms (0, 2, 4, ...)
     for w, sites, daggers in tl_offdiag:
-        xp_, mels_, nonzero_mask_ = apply_terms(x, w, sites, daggers)
+        xp_, mels_, nonzero_mask_ = apply_terms_fun(x, w, sites, daggers)
         xp_list.append(xp_)
         mels_list.append(mels_)
         nonzero_mask_list.append(nonzero_mask_)
@@ -274,13 +320,13 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
                 diag_operators,
                 self._constant,
                 site_dtype=np.uint32,
-                dagger_dtype=np.int8,
+                dagger_dtype=jnp.bool_,
                 weight_dtype=self._dtype,
             )
             self._terms_list_offdiag = prepare_terms_list(
                 offdiag_operators,
                 site_dtype=np.uint32,
-                dagger_dtype=np.int8,
+                dagger_dtype=jnp.bool_,
                 weight_dtype=self._dtype,
             )
 
