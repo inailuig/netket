@@ -62,153 +62,60 @@ def prepare_terms_list(
     return res
 
 
-# TODO implement a version with indexing instead of masks
-# TODO implement a version which uses a fori loop to loop over sites
+# TODO implement a version with masks
+# TODO experiment with unroll
 @partial(jax.jit)
-def apply_term(x, w, sites, daggers):
+def apply_term_scan(x, weight, sites, daggers):
     # sites and daggers need to have reversed order (hightest first!)
 
-    # sites can be an unsigned int
-    # daggers and x need to be signed, preferably of the same type
-
-    if not jnp.issubdtype(x.dtype, jnp.signedinteger):
-        if jnp.issubdtype(x.dtype, jnp.floating):
-            pass  # allow float for the time being
-        else:
-            raise ValueError(
-                f"x has incompatible type. expect a signed integer but got {x.dtype}"
-            )
-    if not jnp.issubdtype(daggers.dtype, jnp.signedinteger):
-        raise ValueError(
-            f"daggers has incompatible type. expect a signed integer but got {daggers.dtype}"
-        )
-    if not jnp.issubdtype(sites.dtype, jnp.integer):
-        raise ValueError(
-            f"sites has incompatible type. expect a integer but got {sites.dtype}"
-        )
-
-    # for daggers it's crucial its a signed int, we need it to go negative
-    # (we might be able to get away using underflow if we are careful not to cast,
-    # but let's not rely on it)
+    # here we do jordan wigner:
+    # for every site:
+    # (1.) destroy/create a particle on current site based the value of dagger
+    #      using the raising/lowering operators σ⁺ and σ⁻
+    #      where σ⁺|0⟩=|1⟩  and σ⁻|0⟩=0
+    #            σ⁺|1⟩=0        σ⁻|1⟩=|0⟩
+    # (2.) apply σᶻ to all sites before the current site
 
     if len(sites) == 0:  # constant diagonal term
-        return x, jnp.full(x.shape[:-1], w), jnp.full(x.shape[:-1], True)
-
-    # TODO precomute all those masks, and pass them instead of the index?
-
-    n_orbitals = x.shape[-1]
-    # mask for the sites we are acting on
-    # ensure it's the same dtype as daggers
-    # e.g. [0,0,1,0]
-    ara = jnp.arange(n_orbitals, dtype=sites.dtype)
-    masks_site = ara[None] == sites[:, None]
-
-    # mask for all sites up to (not including) each site to flip (will be needed for the jordan-wigner)
-    # e.g. [1,1,0,0]
-    masks_all_up_to_site = ara < sites[:, None]
-
-    # here we do jordan wigner
-    # 1. we start with the raising / lowering operators, as given by daggers
-    # raising creates a particle, so we have to add +1
-    # and lowering destroys one, so we have to add -1
-
-    # map [0,1] -> [-1, +1] ( by taking 2x-1)
-    # be careful about type as daggers_pm can and will be negative
-    daggers_pm = daggers - (1 - daggers)
-    # compute the action of each creation/annihilation operator in the term
-    add_flip = masks_site * daggers_pm[:, None]
-
-    # add a first row of 0, for starting the cumsum
-    add_flip_padded = jnp.concatenate(
-        [jnp.zeros_like(add_flip[..., :1, :]), add_flip], axis=-2
-    )
-    # now compute the cumulative action, i.e. what was applied to the state when operator i sees it
-    # the first operator gets the initial state which is why we just padded with 0 meaning do nothing
-    add_flip_cum = jnp.cumsum(add_flip_padded, axis=-2)
-
-    # now apply the actions we just computed
-    # this gives us the state when operator i sees it, after all up to i have been applied
-    x_at_i = x[..., None, :] + add_flip_cum[None]
-
-    # the last one (remember, we padded) is the final state:
-    x_final_ = x_at_i[..., -1, :]
-    # remove final state, now its the state when operator i sees it
-    x_at_i = x_at_i[..., :-1, :]
-
-    # we might have just tried to create a fermion in an already
-    # occupied orbital, or destroyed one in an empty orbital
-    # the resulting matrix element will be zero
-    # to get a valid state here we clip, although we could also just set it to the original state
-    x_final = jnp.clip(x_final_, 0, 1)
-
-    # compute where we created a fermion in an already occupied orbital or destroyed one in an empty orbital
-    # both will result in mel 0
-    # version with indexing
-    # xi = x_at_i[..., jnp.arange(len(sites), dtype=np.uint32), sites]
-    # not_illegal = (xi != daggers[None]).all(axis=-1)
-    # version with masks
-    illegal = ((x_at_i == daggers[:, None]) * masks_site).any(axis=(-2, -1))
-    not_illegal = ~illegal
-
-    # 2. now do the Z gates for the jordan-wigner
-    # (for an operator on site i apply Z on all up to site i)
-
-    # jordan-wigner sign
-    sgn = 1 - 2 * jnp.remainder(
-        jnp.einsum("...aij,ij -> ...a", x_at_i, masks_all_up_to_site), 2
-    )
-
-    # compute the final matrix element
-    # here we cast, for the case when x is float64 but weights are float32
-    # and jax would promote the result to float64
-    w_final = w * (not_illegal * sgn).astype(w.dtype)
-    # we assume w is not 0, otherwise we would have already removed it
-    return x_final, w_final, not_illegal
-
-
-@partial(jax.vmap, in_axes=(None, 0, 0, 0), out_axes=(-2, -1, -1))
-def apply_terms(x, w, sites, daggers):
-    return apply_term(x, w, sites, daggers)
-
-@partial(jax.jit)
-def apply_term_scan(x, w, sites, daggers):
-    # sites and daggers need to have reversed order (hightest first!)
-
-    if len(sites) == 0:  # constant diagonal term
-        return x, jnp.full(x.shape[:-1], w), jnp.full(x.shape[:-1], True)
+        return x, jnp.full(x.shape[:-1], weight), jnp.full(x.shape[:-1], True)
 
     x = x.astype(jnp.bool_)
     assert daggers.dtype == jnp.bool_
 
     n_orbitals = x.shape[-1]
-    ara = jnp.arange(n_orbitals, dtype=sites.dtype)
 
     sgn = jnp.full(x.shape[:-1], False)
-    illegal = jnp.full(x.shape[:-1], False)
-    init = x, sgn, illegal
+    zero = jnp.full(x.shape[:-1], False)
+    init = x, sgn, zero
     xs = sites, daggers
 
     def f(carry, xs):
         site, dagger = xs
-        x_, sgn, illegal = carry
+        x_, sgn, zero = carry
 
-
+        # apply σ⁻ / σ⁺
         x_new = x_.at[..., site].set(dagger)
 
-        mask_all_up_to_site = ara < site
+        # compute sign from σᶻ (stored as 0/1 for +1/-1)
+        mask_all_up_to_site = jnp.arange(n_orbitals, dtype=sites.dtype) < site
         sgn = sgn ^ jax.lax.reduce(x_ & mask_all_up_to_site[None], False, lambda x, y: x  ^ y, (x_.ndim-1,))
 
-        illegal = illegal | (x_.at[..., site].get() == dagger)
+        # check if we did σ⁺|1⟩=0 or σ⁻|0⟩=0
+        zero = zero | (x_.at[..., site].get() == dagger)
 
-        return (x_new, sgn, illegal), illegal
+        return (x_new, sgn, zero), None
 
+    # scan over the sites
     # TODO unroll?
-    (x_final, sgn, illegal), _ = jax.lax.scan(f, init, xs)
+    (x_final, sgn, zero), _ = jax.lax.scan(f, init, xs)
 
+    # compute the real value of the sign (map [0,1] ↦ [+1,-1])
     sign = 1 - 2 * sgn.astype(w.dtype)
-    not_illegal = ~illegal
-    w_final = w * not_illegal * sign
-    return x_final.astype(x.dtype), w_final, not_illegal
+    # compute the final coefficient
+    not_zero = ~zero
+    w_final = weight * not_zero * sign
+    # return the xp, the mel and wether mel is zero
+    return x_final.astype(x.dtype), w_final, not_zero
 
 @partial(jax.vmap, in_axes=(None, 0, 0, 0), out_axes=(-2, -1, -1))
 def apply_terms_scan(x, w, sites, daggers):
