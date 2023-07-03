@@ -33,6 +33,8 @@ from ._version import version as __version__  # noqa: F401
 from . import utils
 
 
+from . import errors
+
 __all__ = [
     "exact",
     "graph",
@@ -46,6 +48,7 @@ __all__ = [
     "vqs",
     "nn",
 ]
+
 
 from . import jax
 from . import stats
