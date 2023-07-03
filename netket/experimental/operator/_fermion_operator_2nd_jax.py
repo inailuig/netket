@@ -236,21 +236,26 @@ def _reduce_xor(x, axes):
 def _reduce_or(x, axes):
     return jax.lax.reduce_or_p.bind(x, axes=tuple(axes))
 
-def apply_term_scan_bits(x, weight, sites, daggers, unroll=1):
+def apply_term_scan_bits(x, weight, sites, daggers, unroll=1, process=True, n_orbitals=None):
 
     if len(sites) == 0:  # constant diagonal term
         return x, jnp.full(x.shape[:-1], weight), jnp.full(x.shape[:-1], True)
-    n_orbitals = x.shape[-1]
-    x = x.astype(jnp.uint8)
+
     assert daggers.dtype in [jnp.bool_, jnp.uint8]
-    xb = jnp.packbits(x, axis=-1,bitorder='little')
+    if process:
+        n_orbitals = x.shape[-1]
+        x = x.astype(jnp.uint8)
+        xb = jnp.packbits(x, axis=-1,bitorder='little')
+    else:
+        assert n_orbitals is not None
+        assert x.dtype == jnp.uint8
+        xb = x
     # TODO precompute those ?
     # site_mask = biti(sites, n_orbitals)
     # sign_mask = bituptoi(sites, n_orbitals)
 
-    # TODO which is faster?
-    _parity = lambda x: _xor_reduce(jnp.unpackbits(x), (-1,))
-    #_parity = lambda x: jax.lax.rem(jax.lax.population_count(x), jnp.uint8(2))
+    # TODO is unpackbits + xor_reduce faster?
+    _parity = lambda x: jax.lax.rem(jax.lax.population_count(x), jnp.uint8(2))
 
     sgn = jnp.zeros(x.shape[:-1], dtype=jnp.uint8)
     zero = jnp.zeros(x.shape[:-1], dtype=jnp.uint8)
@@ -283,18 +288,65 @@ def apply_term_scan_bits(x, weight, sites, daggers, unroll=1):
     sign = 1 - 2 * _parity(sgn).astype(weight.dtype)
     not_zero = jax.lax.population_count(zero) == 0
     w_final = weight * not_zero * sign
-    x_final = jnp.unpackbits(x_final, count=n_orbitals, bitorder='little', axis=-1)
+    # TODO only unpack after we trashed the zeros in get_conn_padded_jax
+    # TO avoid extra work
+    if process:
+        x_final = jnp.unpackbits(x_final, count=n_orbitals, bitorder='little', axis=-1)
     return x_final.astype(x.dtype), w_final, not_zero
 
 
-@partial(jax.vmap, in_axes=(None, 0, 0, 0, None), out_axes=(-2, -1, -1))
-def _apply_terms_scan_bits(x, w, sites, daggers, unroll):
-    return apply_term_scan_bits(x, w, sites, daggers, unroll=unroll)
+@partial(jax.vmap, in_axes=(None, 0, 0, 0, None, None, None), out_axes=(-2, -1, -1))
+def _apply_terms_scan_bits(x, w, sites, daggers, unroll, process, n_orbitals):
+    return apply_term_scan_bits(x, w, sites, daggers, unroll=unroll, process=process, n_orbitals=n_orbitals)
 
 
-@partial(jax.jit, static_argnums=4)
-def apply_terms_scan_bits(x, w, sites, daggers, unroll=1):
-    return _apply_terms_scan_bits(x, w, sites, daggers, unroll)
+@partial(jax.jit, static_argnums=(4,5,6))
+def apply_terms_scan_bits(x, w, sites, daggers, unroll=1, process=True, n_orbitals=None):
+    return _apply_terms_scan_bits(x, w, sites, daggers, unroll, process, n_orbitals)
+
+# the old impl, still competitive on gpu
+def apply_term(x, w, sites, daggers):
+    #!!! sites and daggers need to have reversed order (hightest first!)
+    #i.e. sites, daggers = jnp.array(term)[::-1].reshape([-1, 2]).T
+    # TODO instead apply half to the left and half to the right and compare middle
+    # assuming some ordering
+
+    # sites can be an unsigned int
+    # daggers and x need to be signed, preferably of the same type
+
+    # assert x.dtype == np.int8
+    # assert daggers.dtype == np.int8
+    # assert sites.dtype == np.uint8
+
+    if len(sites) == 0:  # constant diagonal term
+        return x, jnp.full(x.shape[:-1], w), jnp.full(x.shape[:-1], True)
+
+    no = x.shape[-1]
+    fill_vec = jnp.arange(no, dtype=sites.dtype)
+    masks_flip = jnp.eye(no, dtype=x.dtype)[sites]
+    masks_sgn = (fill_vec[None] < sites[:, None]).astype(x.dtype)
+    daggers_pm = (daggers - (1 - daggers)).astype(x.dtype)
+    add_flip = masks_flip * daggers_pm[:, None]
+    add_flip_padded = jnp.vstack([jnp.zeros_like(add_flip[..., 0, :]), add_flip])
+    add_flip_cum = jnp.cumsum(add_flip_padded, axis=-2)
+    x_at_i = x[..., None, :] + add_flip_cum[None]
+    x_final_ = x_at_i[..., -1, :]
+    x_at_i = x_at_i[..., :-1, :]
+    x_final = jnp.clip(x_final_, 0, 1)
+    r = jnp.remainder(jnp.einsum("aij,ij -> a", x_at_i, masks_sgn), 2)
+    sgn = -1 * r + (1 - r)
+    d = x_at_i != daggers[None, :, None]
+    xi = x_at_i[..., jnp.arange(len(sites), dtype=np.uint32), sites]
+    d = xi != daggers[None]
+    w_final = w * d.prod(axis=-1) * sgn
+    return x_final, w_final, d.prod(axis=-1)
+
+@partial(jax.vmap, in_axes=(None, 0, 0, 0), out_axes=(-2,-1,-1))
+def _apply_term_vmap(x, w, sites, daggers):
+    res =  apply_term(x, w, sites, daggers)
+    return res
+
+
 
 
 @partial(jax.jit, static_argnums=(0, 4))
@@ -351,6 +403,7 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
                 offdiag_operators
             )
             self._initialized = True
+            self._kwargs = {}
 
     def tree_flatten(self):
         self._setup()
@@ -396,6 +449,7 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
             self._terms_list_diag,
             self._terms_list_offdiag,
             x,
+            **self._kwargs,
         )
         # TODO if we are outside jit (i don't know how to detect it)
         # we coule check here that _max_conn_size was not too small
