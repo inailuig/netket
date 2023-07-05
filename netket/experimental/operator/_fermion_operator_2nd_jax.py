@@ -186,27 +186,32 @@ def get_conn_padded_jax(
         mels_list.append(mels_)
         nonzero_mask_list.append(nonzero_mask_)
 
-    # pad with 0 and old state
-    xp_list.append(x[..., None, :])
-    mels_list.append(jnp.zeros((x.shape[:-1] + (1,)), dtype=weight_dtype))
+    if max_conn_size is None:
+        xp_ = jnp.concatenate(xp_list, axis=-2)
+        mels_ = jnp.concatenate(mels_list, axis=-1)
+        return xp_, mels_, None
+    else:
+        # pad with 0 and old state
+        xp_list.append(x[..., None, :])
+        mels_list.append(jnp.zeros((x.shape[:-1] + (1,)), dtype=weight_dtype))
 
-    xp_padded = jnp.concatenate(xp_list, axis=-2)
-    mels_padded = jnp.concatenate(mels_list, axis=-1)
-    nonzero_mask = jnp.concatenate(nonzero_mask_list, axis=-1)
+        xp_padded = jnp.concatenate(xp_list, axis=-2)
+        mels_padded = jnp.concatenate(mels_list, axis=-1)
+        nonzero_mask = jnp.concatenate(nonzero_mask_list, axis=-1)
 
-    # move the nonzeros to the beginning
+        # move the nonzeros to the beginning
 
-    n_nonzero = nonzero_mask.sum(axis=-1)
-    _nonzero_fn = partial(jnp.where, size=max_conn_size, fill_value=-1)
-    (i_nonzero,) = jnp.vectorize(_nonzero_fn, signature="(i)->(j)")(nonzero_mask)
-    xp_u = jnp.take_along_axis(xp_padded, i_nonzero[..., None], axis=-2)
-    mels_u = jnp.take_along_axis(mels_padded, i_nonzero, axis=-1)
+        n_nonzero = nonzero_mask.sum(axis=-1)
+        _nonzero_fn = partial(jnp.where, size=max_conn_size, fill_value=-1)
+        (i_nonzero,) = jnp.vectorize(_nonzero_fn, signature="(i)->(j)")(nonzero_mask)
+        xp_u = jnp.take_along_axis(xp_padded, i_nonzero[..., None], axis=-2)
+        mels_u = jnp.take_along_axis(mels_padded, i_nonzero, axis=-1)
 
-    # TODO here would be the place to remove / merge repeated mels
-    #
-    # you should check that n_nonzero <= max_conn_size outside of jit,
-    # and increase max_conn_size if it's not
-    return xp_u, mels_u, n_nonzero
+        # TODO here would be the place to remove / merge repeated mels
+        #
+        # you should check that n_nonzero <= max_conn_size outside of jit,
+        # and increase max_conn_size if it's not
+        return xp_u, mels_u, n_nonzero
 
 def _biti(i, N, dtype=np.uint8):
     bitwidth = 8*dtype().itemsize
