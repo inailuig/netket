@@ -227,6 +227,162 @@ def apply_terms_scan_bits(x, w, sites, daggers, unroll=1, process=True, n_orbita
     return _apply_terms_scan_bits(x, w, sites, daggers, unroll, process, n_orbitals)
 
 
+
+# mostly masks, some indexing
+def _apply_term_masks(x, w, sites, daggers):
+    #!!! sites and daggers need to have reversed order (hightest first!)
+    #i.e. sites, daggers = jnp.array(term)[::-1].reshape([-1, 2]).T
+    # TODO instead apply half to the left and half to the right and compare middle
+    # assuming some ordering
+
+    # sites can be an unsigned int
+    # daggers and x need to be signed, preferably of the same type
+
+    # assert x.dtype == np.int8
+    # assert daggers.dtype == np.int8
+    # assert sites.dtype == np.uint8
+
+    if len(sites) == 0:  # constant diagonal term
+        return x, jnp.full(x.shape[:-1], w), jnp.full(x.shape[:-1], True)
+
+    no = x.shape[-1]
+    fill_vec = jnp.arange(no, dtype=sites.dtype)
+    masks_flip = jnp.eye(no, dtype=x.dtype)[sites]
+    masks_sgn = (fill_vec[None] < sites[:, None]).astype(x.dtype)
+    daggers_pm = (daggers - (1 - daggers)).astype(x.dtype)
+    add_flip = masks_flip * daggers_pm[:, None]
+    add_flip_padded = jnp.vstack([jnp.zeros_like(add_flip[..., 0, :]), add_flip])
+    add_flip_cum = jnp.cumsum(add_flip_padded, axis=-2)
+    x_at_i = x[..., None, :] + add_flip_cum[None]
+    x_final_ = x_at_i[..., -1, :]
+    x_at_i = x_at_i[..., :-1, :]
+    x_final = jnp.clip(x_final_, 0, 1)
+    r = jnp.remainder(jnp.einsum("aij,ij -> a", x_at_i, masks_sgn), 2)
+    sgn = -1 * r + (1 - r)
+    d = x_at_i != daggers[None, :, None]
+    xi = x_at_i[..., jnp.arange(len(sites), dtype=np.uint32), sites]
+    d = xi != daggers[None]
+    # here we cast, for the case when x is float64 but weights are float32
+    # and jax would promote the result to float64
+    w_final = w * (d.prod(axis=-1) * sgn).astype(w.dtype)
+    return x_final, w_final, d.prod(axis=-1)
+
+@partial(jax.vmap, in_axes=(None, 0, 0, 0), out_axes=(-2,-1,-1))
+def apply_terms_masks(x, w, sites, daggers):
+    res =  _apply_term_masks(x, w, sites, daggers)
+    return res
+
+# only masks
+def _apply_term_only_masks(x, w, sites, daggers):
+    # sites and daggers need to have reversed order (hightest first!)
+
+    # sites can be an unsigned int
+    # daggers and x need to be signed, preferably of the same type
+
+    if not jnp.issubdtype(x.dtype, jnp.signedinteger):
+        if jnp.issubdtype(x.dtype, jnp.floating):
+            pass  # allow float for the time being
+        else:
+            raise ValueError(
+                f"x has incompatible type. expect a signed integer but got {x.dtype}"
+            )
+    if not jnp.issubdtype(daggers.dtype, jnp.signedinteger):
+        raise ValueError(
+            f"daggers has incompatible type. expect a signed integer but got {daggers.dtype}"
+        )
+    if not jnp.issubdtype(sites.dtype, jnp.integer):
+        raise ValueError(
+            f"sites has incompatible type. expect a integer but got {sites.dtype}"
+        )
+
+    # for daggers it's crucial its a signed int, we need it to go negative
+    # (we might be able to get away using underflow if we are careful not to cast,
+    # but let's not rely on it)
+
+    if len(sites) == 0:  # constant diagonal term
+        return x, jnp.full(x.shape[:-1], w), jnp.full(x.shape[:-1], True)
+
+    # TODO precomute all those masks, and pass them instead of the index?
+
+    n_orbitals = x.shape[-1]
+    # mask for the sites we are acting on
+    # ensure it's the same dtype as daggers
+    # e.g. [0,0,1,0]
+    ara = jnp.arange(n_orbitals, dtype=sites.dtype)
+    masks_site = ara[None] == sites[:, None]
+
+    # mask for all sites up to (not including) each site to flip (will be needed for the jordan-wigner)
+    # e.g. [1,1,0,0]
+    masks_all_up_to_site = ara < sites[:, None]
+
+    # here we do jordan wigner
+    # 1. we start with the raising / lowering operators, as given by daggers
+    # raising creates a particle, so we have to add +1
+    # and lowering destroys one, so we have to add -1
+
+    # map [0,1] -> [-1, +1] ( by taking 2x-1)
+    # be careful about type as daggers_pm can and will be negative
+    daggers_pm = daggers - (1 - daggers)
+    # compute the action of each creation/annihilation operator in the term
+    add_flip = masks_site * daggers_pm[:, None]
+
+    # add a first row of 0, for starting the cumsum
+    add_flip_padded = jnp.concatenate(
+        [jnp.zeros_like(add_flip[..., :1, :]), add_flip], axis=-2
+    )
+    # now compute the cumulative action, i.e. what was applied to the state when operator i sees it
+    # the first operator gets the initial state which is why we just padded with 0 meaning do nothing
+    add_flip_cum = jnp.cumsum(add_flip_padded, axis=-2)
+
+    # now apply the actions we just computed
+    # this gives us the state when operator i sees it, after all up to i have been applied
+    x_at_i = x[..., None, :] + add_flip_cum[None]
+
+    # the last one (remember, we padded) is the final state:
+    x_final_ = x_at_i[..., -1, :]
+    # remove final state, now its the state when operator i sees it
+    x_at_i = x_at_i[..., :-1, :]
+
+    # we might have just tried to create a fermion in an already
+    # occupied orbital, or destroyed one in an empty orbital
+    # the resulting matrix element will be zero
+    # to get a valid state here we clip, although we could also just set it to the original state
+    x_final = jnp.clip(x_final_, 0, 1)
+
+    # compute where we created a fermion in an already occupied orbital or destroyed one in an empty orbital
+    # both will result in mel 0
+    # version with indexing
+    # xi = x_at_i[..., jnp.arange(len(sites), dtype=np.uint32), sites]
+    # not_illegal = (xi != daggers[None]).all(axis=-1)
+    # version with masks
+    illegal = ((x_at_i == daggers[:, None]) * masks_site).any(axis=(-2, -1))
+    not_illegal = ~illegal
+
+    # 2. now do the Z gates for the jordan-wigner
+    # (for an operator on site i apply Z on all up to site i)
+
+    # jordan-wigner sign
+    sgn = 1 - 2 * jnp.remainder(
+        jnp.einsum("...aij,ij -> ...a", x_at_i, masks_all_up_to_site), 2
+    )
+
+    # compute the final matrix element
+    # here we cast, for the case when x is float64 but weights are float32
+    # and jax would promote the result to float64
+    w_final = w * (not_illegal * sgn).astype(w.dtype)
+    # we assume w is not 0, otherwise we would have already removed it
+    return x_final, w_final, not_illegal
+
+
+@partial(jax.vmap, in_axes=(None, 0, 0, 0), out_axes=(-2, -1, -1))
+def apply_terms_only_masks(x, w, sites, daggers):
+    # TODO make sure we have the correct type a priori, and avoid casting here
+    x = x.astype(np.int8)
+    daggers = daggers.astype(np.int8)
+    return _apply_term_only_masks(x, w, sites, daggers)
+
+
+
 # default to unroll=4, which means for chemistry we unroll everything
 # seems faster on gpu
 @partial(jax.jit, static_argnums=(0, 1, 5))
