@@ -38,6 +38,7 @@ from ._fermion_operator_2nd_utils import (
     _remove_dict_zeros,
     _verify_input,
     _normal_ordering,
+    zero_defaultdict,
     OperatorDict,
 )
 
