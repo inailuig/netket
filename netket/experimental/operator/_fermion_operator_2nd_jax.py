@@ -30,6 +30,8 @@ def _reverse_split_cast_term_part(term, site_dtype, dagger_dtype):
     return sites.astype(site_dtype), daggers.astype(dagger_dtype)
 
 
+# TODO write a version for normal ordering, where we group operators which destroy the same sites
+
 def prepare_terms_list(
     operators,
     constant=None,

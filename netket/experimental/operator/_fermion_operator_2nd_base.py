@@ -37,6 +37,7 @@ from ._fermion_operator_2nd_utils import (
     _make_tuple_tree,
     _remove_dict_zeros,
     _verify_input,
+    _normal_ordering,
     OperatorDict,
 )
 
@@ -418,57 +419,24 @@ class FermionOperator2ndBase(DiscreteOperator):
         new._operators = dict(zip(terms, weights))
         return new
 
+    def _to_normal_ordering(self):
+        """
+        return a copy of the operator which is in normal ordering
+        (large indices and creation to the left)
+        """
+        terms = self._terms
+        weights = self._weights
+        new_terms, new_weights, shift = _collect_constants(*_normal_ordering(terms, weights))
+        op = self.copy()
 
-def _pack_internals(operators: OperatorDict, dtype: DType):
-    """
-    Create the internal structures to compute the matrix elements
-    Processes and adds a single term such that we can compute its matrix elements, in tuple format ((1,1), (2,0))
-    """
-    # properties of single-fermion operators, e.g. "0^"
-    orb_idxs = []
-    daggers = []
-    # properties of multi-body operators, e.g. "0^ 1"
-    weights = []
-    # herm_term = []
-    diag_idxs = []
-    off_diag_idxs = []
-    # below connect the second type to the first type (used to split single-fermion lists)
-    term_split_idxs = []
-
-    term_counter = 0
-    single_op_counter = 0
-    for term, weight in operators.items():
-        if len(term) == 0:
-            raise ValueError("terms cannot be size 0")
-        if not all(len(t) == 2 for t in term):
-            raise ValueError(f"terms must contain (i, dag) pairs, but received {term}")
-
-        # fill some info about the term
-        weights.append(weight)
-        is_diag = _is_diag_term(term)
-        if is_diag:
-            diag_idxs.append(term_counter)
-        else:
-            off_diag_idxs.append(term_counter)
-
-        # single-fermion operators
-        for orb_idx, dagger in reversed(term):
-            # orb_idxs: holds the hilbert index of the orbital
-            orb_idxs.append(orb_idx)
-            # daggers: stores whether operator is creator or annihilator
-            daggers.append(bool(dagger))
-            single_op_counter += 1
-
-        term_split_idxs.append(single_op_counter)
-        term_counter += 1
-
-    orb_idxs = np.array(orb_idxs, dtype=np.intp)
-    daggers = np.array(daggers, dtype=bool)
-    weights = np.array(weights, dtype=dtype)
-    # term_ends = np.array(term_ends, dtype=bool)
-    # herm_term = np.array(herm_term, dtype=bool)
-    diag_idxs = np.array(diag_idxs, dtype=np.intp)
-    off_diag_idxs = np.array(off_diag_idxs, dtype=np.intp)
-    term_split_idxs = np.array(term_split_idxs, dtype=np.intp)
-
-    return orb_idxs, daggers, weights, diag_idxs, off_diag_idxs, term_split_idxs
+        if len(terms) > 0:
+            operators = zero_defaultdict(type(terms[0]))
+            for t, w in zip(new_terms, new_weights):
+                operators[t] += w
+            # sort the operators, shorter terms first
+            op._operators = dict(sorted(_remove_dict_zeros(dict(operators)).items(), key=lambda x: (len(x[0]),) + x[0]))
+            op._constant = self._constant + shift
+        else:  # no terms
+            op._operators = {}
+            op._constant = self._constant
+        return op
