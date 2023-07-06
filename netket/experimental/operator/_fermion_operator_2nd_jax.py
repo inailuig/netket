@@ -84,8 +84,8 @@ def _apply_term_scan(x, weight, sites, daggers, unroll=1):
 
     n_orbitals = x.shape[-1]
 
-    sgn = jnp.full(x.shape[:-1], False)
-    zero = jnp.full(x.shape[:-1], False)
+    sgn = jnp.zeros(x.shape[:-1], dtype=jnp.bool_)
+    zero = jnp.zeros(x.shape[:-1], dtype=jnp.bool_)
     init = x, sgn, zero
     xs = sites, daggers
 
@@ -98,16 +98,15 @@ def _apply_term_scan(x, weight, sites, daggers, unroll=1):
 
         # compute sign from σᶻ (stored as 0/1 for +1/-1)
         mask_all_up_to_site = jnp.arange(n_orbitals, dtype=sites.dtype) < site
-        sgn = sgn ^ jax.lax.reduce(
-            x_ & mask_all_up_to_site[None], False, lambda x, y: x ^ y, (x_.ndim - 1,)
-        )
+        x_masked = x_ & mask_all_up_to_site[None]
+        sgn = sgn ^ _reduce_xor(x_masked, (x_.ndim - 1,))
 
         # check if we did σ⁺|1⟩=0 or σ⁻|0⟩=0
         zero = zero | (x_.at[..., site].get() == dagger)
 
         return (x_new, sgn, zero), None
 
-    # scan over the sites
+    # scan over the sites the term is acting on
     (x_final, sgn, zero), _ = jax.lax.scan(f, init, xs, unroll=unroll)
 
     # compute the real value of the sign (map [0,1] ↦ [+1,-1])
