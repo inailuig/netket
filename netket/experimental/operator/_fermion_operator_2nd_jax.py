@@ -129,6 +129,104 @@ def apply_terms_scan(x, w, sites, daggers, unroll=1):
     return _apply_terms_scan(x, w, sites, daggers, unroll)
 
 
+def _biti(i, N, dtype=np.uint8):
+    bitwidth = 8*dtype().itemsize
+    n, r = divmod(N, bitwidth)
+    if r > 0: n = n+1 # padding
+    x = jnp.zeros(n, dtype=dtype)
+
+    i, ib = jnp.divmod(i, bitwidth)
+    ib = ib.astype(dtype)
+    byte_index = n-i-1
+    # x is uint there fore we take x.shape[0]-i-1, as -i-1 would underflow
+    return x.at[x.shape[0]-i-1].set(jax.lax.shift_left(dtype(1),ib)), byte_index
+
+@partial(jnp.vectorize, signature='()->(n)', excluded=(1,))
+def biti(i, N, dtype=np.uint8):
+    res, _ = _biti(i, N, dtype=dtype)
+    return res
+
+@partial(jnp.vectorize, signature='()->(n)', excluded=(1,))
+def bituptoi(i, N, dtype=np.uint8):
+    mask, byte_index = _biti(i, N, dtype=dtype)
+    n = mask.shape[-1]
+    return jax.lax.select(jnp.arange(n)>=byte_index, mask-dtype(1), mask)
+
+
+def _reduce_xor(x, axes):
+    return jax.lax.reduce_xor_p.bind(x, axes=tuple(axes))
+def _reduce_or(x, axes):
+    return jax.lax.reduce_or_p.bind(x, axes=tuple(axes))
+
+def _apply_term_scan_bits(x, weight, sites, daggers, unroll=1, process=True, n_orbitals=None):
+
+    if len(sites) == 0:  # constant diagonal term
+        return x, jnp.full(x.shape[:-1], weight), jnp.full(x.shape[:-1], True)
+
+    assert daggers.dtype in [jnp.bool_, jnp.uint8]
+    if process:
+        n_orbitals = x.shape[-1]
+        x = x.astype(jnp.uint8)
+        xb = jnp.packbits(x, axis=-1,bitorder='little')
+    else:
+        assert n_orbitals is not None
+        assert x.dtype == jnp.uint8
+        xb = x
+    # TODO precompute those ?
+    # site_mask = biti(sites, n_orbitals)
+    # sign_mask = bituptoi(sites, n_orbitals)
+
+    # TODO is unpackbits + xor_reduce faster?
+    _parity = lambda x: jax.lax.rem(jax.lax.population_count(x), jnp.uint8(2))
+
+    sgn = jnp.zeros(x.shape[:-1], dtype=jnp.uint8)
+    zero = jnp.zeros(x.shape[:-1], dtype=jnp.uint8)
+
+    init = xb, sgn, zero
+    xs = sites, daggers
+
+    def f(carry, xs):
+        site, dagger = xs
+        x_, sgn, zero = carry
+        site_mask = biti(site, n_orbitals)
+        sign_mask = bituptoi(site, n_orbitals)
+
+        # apply σ⁻ / σ⁺
+        # here we (arbitrarily) do
+        # σ⁺|1⟩ = 0 |0⟩ and σ⁻|0⟩ = 0 |1⟩
+        # as flipping is cheaper than setting/unsetting a bit
+        x_new = x_ ^ site_mask
+
+        # compute sign from σᶻ (stored as 0/1 for +1/-1)
+        sgn = sgn ^ _reduce_xor(x_ & sign_mask, (x_.ndim - 1,))
+
+        # check if we did σ⁺|1⟩=0 or σ⁻|0⟩=0
+        tmp = (x_^((1-dagger)*0xFF))&site_mask
+        zero = zero | _reduce_or(tmp, axes=(tmp.ndim-1,))
+
+        return (x_new, sgn, zero), None
+
+    (x_final, sgn, zero), _ = jax.lax.scan(f, init, xs, unroll=unroll)
+    sign = 1 - 2 * _parity(sgn).astype(weight.dtype)
+    not_zero = jax.lax.population_count(zero) == 0
+    w_final = weight * not_zero * sign
+    # TODO only unpack after we trashed the zeros in get_conn_padded_jax
+    # TO avoid extra work
+    if process:
+        x_final = jnp.unpackbits(x_final, count=n_orbitals, bitorder='little', axis=-1)
+    return x_final.astype(x.dtype), w_final, not_zero
+
+
+@partial(jax.vmap, in_axes=(None, 0, 0, 0, None, None, None), out_axes=(-2, -1, -1))
+def _apply_terms_scan_bits(x, w, sites, daggers, unroll, process, n_orbitals):
+    return _apply_term_scan_bits(x, w, sites, daggers, unroll=unroll, process=process, n_orbitals=n_orbitals)
+
+
+@partial(jax.jit, static_argnums=(4,5,6))
+def apply_terms_scan_bits(x, w, sites, daggers, unroll=1, process=True, n_orbitals=None):
+    return _apply_terms_scan_bits(x, w, sites, daggers, unroll, process, n_orbitals)
+
+
 # default to unroll=4, which means for chemistry we unroll everything
 # seems faster on gpu
 @partial(jax.jit, static_argnums=(0, 1, 5))
