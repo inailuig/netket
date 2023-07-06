@@ -203,9 +203,8 @@ def _biti(i, N, dtype=np.uint8):
 
     i, ib = jnp.divmod(i, bitwidth)
     ib = ib.astype(dtype)
-    byte_index = n-i-1
     # x is uint there fore we take x.shape[0]-i-1, as -i-1 would underflow
-    return x.at[x.shape[0]-i-1].set(jax.lax.shift_left(dtype(1),ib)), byte_index
+    return x.at[i].set(jax.lax.shift_left(dtype(1),ib)), i
 
 @partial(jnp.vectorize, signature='()->(n)', excluded=(1,))
 def biti(i, N, dtype=np.uint8):
@@ -216,7 +215,7 @@ def biti(i, N, dtype=np.uint8):
 def bituptoi(i, N, dtype=np.uint8):
     mask, byte_index = _biti(i, N, dtype=dtype)
     n = mask.shape[-1]
-    return jax.lax.select(jnp.arange(n)>=byte_index, mask-dtype(1), mask)
+    return jax.lax.select(jnp.arange(n)<=byte_index, mask-dtype(1), mask)
 
 
 def _reduce_xor(x, axes):
