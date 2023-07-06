@@ -582,6 +582,8 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
             )
             self._initialized = True
 
+            self._kwargs = {'apply_terms_fun' : apply_terms_scan_bits}
+
     def tree_flatten(self):
         self._setup()
         data = (
@@ -626,6 +628,7 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
             self._terms_list_diag,
             self._terms_list_offdiag,
             x,
+            **self._kwargs,
         )
         # TODO if we are outside jit (i don't know how to detect it)
         # we coule check here that _max_conn_size was not too small
@@ -647,4 +650,5 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
             self._terms_list_diag,
             self._terms_list_offdiag,
             x,
+            **self.kwargs,
         )
