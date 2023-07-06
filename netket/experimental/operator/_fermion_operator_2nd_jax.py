@@ -65,7 +65,7 @@ def prepare_terms_list(
 # TODO implement a version which replaces the logic with math,
 # maybe it can be faster to use float16 or float32
 @partial(jax.jit, static_argnums=4)
-def apply_term_scan(x, weight, sites, daggers, unroll=1):
+def _apply_term_scan(x, weight, sites, daggers, unroll=1):
     # sites and daggers need to have reversed order (hightest first!)
 
     # here we do jordan wigner:
@@ -121,7 +121,7 @@ def apply_term_scan(x, weight, sites, daggers, unroll=1):
 
 @partial(jax.vmap, in_axes=(None, 0, 0, 0, None), out_axes=(-2, -1, -1))
 def _apply_terms_scan(x, w, sites, daggers, unroll):
-    return apply_term_scan(x, w, sites, daggers, unroll=unroll)
+    return _apply_term_scan(x, w, sites, daggers, unroll=unroll)
 
 
 @partial(jax.jit, static_argnums=4)
