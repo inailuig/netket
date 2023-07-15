@@ -137,7 +137,7 @@ class VMC(AbstractVariationalDriver):
 
         # If parameters are real, then take only real part of the gradient (if it's complex)
         self._dp = jax.tree_map(
-            lambda x, target: (x if jnp.iscomplexobj(target) else x.real),
+            lambda x, target: (x if jnp.iscomplexobj(target) or not jnp.iscomplexobj(x) else jax.jit(jax.lax.real)(x)), # jit real for gda
             self._dp,
             self.state.parameters,
         )
