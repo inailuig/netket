@@ -5,14 +5,14 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 # b) get the sha256 hash of the commit by running:
 #    curl -L https://github.com/openxla/xla/archive/<git hash>.tar.gz | sha256sum
 #    and update the sha256 with the result.
-http_archive(
-    name = "xla",
-    sha256 = "4ec16aff3862c5a243db956ce558d7a62eb79f5e20747b0e80802a3b0d12e419",
-    strip_prefix = "xla-12de6ec958419b57be248d0acd2d9f757e71748c",
-    urls = [
-        "https://github.com/openxla/xla/archive/12de6ec958419b57be248d0acd2d9f757e71748c.tar.gz",
-    ],
-)
+#http_archive(
+#    name = "xla",
+#    sha256 = "4ec16aff3862c5a243db956ce558d7a62eb79f5e20747b0e80802a3b0d12e419",
+#    strip_prefix = "xla-12de6ec958419b57be248d0acd2d9f757e71748c",
+#    urls = [
+#        "https://github.com/openxla/xla/archive/12de6ec958419b57be248d0acd2d9f757e71748c.tar.gz",
+#    ],
+#)
 
 # For development, one often wants to make changes to the TF repository as well
 # as the JAX repository. You can override the pinned repository above with a
@@ -22,10 +22,10 @@ http_archive(
 #    python build/build.py --bazel_options=--override_repository=xla=/path/to/xla
 #    or
 # b) by commenting out the http_archive above and uncommenting the following:
-# local_repository(
-#    name = "xla",
-#    path = "/path/to/xla",
-# )
+local_repository(
+    name = "xla",
+    path = "/home/clemens/mpi/xla",
+)
 
 load("//third_party/ducc:workspace.bzl", ducc = "repo")
 ducc()

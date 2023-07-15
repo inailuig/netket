@@ -258,11 +258,22 @@ def register_backend_factory(name: str, factory: BackendFactory, *,
     factory, priority, fail_quietly, experimental)
 
 
-register_backend_factory('cpu',
-                         partial(xla_client.make_cpu_client, use_tfrt=True),
+
+
+
+
+
+def make_cpu_client() -> xla_client.Client:
+  return xla_client.make_cpu_client2(
+      use_tfrt=True,
+      distributed_client=distributed.global_state.client,
+      node_id=distributed.global_state.process_id,
+      num_nodes=distributed.global_state.num_processes,
+  )  # type: ignore
+
+register_backend_factory('cpu',make_cpu_client,
                          priority=0,
                          fail_quietly=False)
-
 
 def make_gpu_client(
     *, platform_name: str, visible_devices_flag: str
