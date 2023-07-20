@@ -97,31 +97,12 @@ class ExactSampler(Sampler):
         # go, since it's not really a chain anyway. This will be much faster because
         # we call into python only once.
         new_rng, rng = jax.random.split(state.rng)
-        numbers = jax.random.choice(
+        samples = jax.random.choice(
             rng,
-            sampler.hilbert.n_states,
+            sampler.hilbert.all_states(),
             shape=(chain_length * sampler.n_chains_per_rank,),
             replace=True,
             p=state.pdf,
-        )
-
-        # We use a host-callback to convert integers labelling states to
-        # valid state-arrays because that code is written with numba and
-        # we have not yet converted it to jax.
-        #
-        # For future investigators:
-        # this will lead to a crash if numbers_to_state throws.
-        # it throws if we feed it nans!
-        samples = jax.pure_callback(
-            lambda numbers: sampler.hilbert.numbers_to_states(numbers),
-            jax.ShapeDtypeStruct(
-                (sampler.n_chains_per_rank * chain_length, sampler.hilbert.size),
-                jnp.float64,
-            ),
-            numbers,
-        )
-        samples = jnp.asarray(samples, dtype=sampler.dtype).reshape(
-            sampler.n_chains_per_rank, chain_length, sampler.hilbert.size
         )
 
         return samples, state.replace(rng=new_rng)
