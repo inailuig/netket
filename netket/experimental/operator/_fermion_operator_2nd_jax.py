@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import numpy as np
 from functools import partial
 
-from jax.tree_util import register_pytree_node_class
+from jax.tree_util import register_pytree_node_class, Partial
 from netket.operator import DiscreteJaxOperator
 from ._fermion_operator_2nd_base import FermionOperator2ndBase
 from ._fermion_operator_2nd_utils import _is_diag_term
@@ -549,6 +549,7 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
     A fermionic operator in :math:`2^{nd}` quantization.
     Jax implementation.
     """
+    _kwargs = {'apply_terms_fun' :  Partial(apply_terms_scan_bits)} # TODO properly
 
     def _setup(self, force: bool = False):
         """Analyze the operator strings and precompute arrays for get_conn inference"""
@@ -583,7 +584,6 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
             )
             self._initialized = True
 
-            self._kwargs = {'apply_terms_fun' : apply_terms_scan_bits}
 
     def tree_flatten(self):
         self._setup()

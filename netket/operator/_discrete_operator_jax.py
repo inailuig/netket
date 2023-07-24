@@ -203,9 +203,9 @@ class DiscreteJaxOperator(DiscreteOperator):
         n = x.shape[0]
         xp, mels = self.get_conn_padded(x)
         a = mels.ravel()
-        i = np.broadcast_to(np.arange(n)[..., None], mels.shape).ravel()
+        i = jnp.broadcast_to(jnp.arange(n)[..., None], mels.shape).ravel()
         j = self.hilbert.states_to_numbers(xp).ravel()
-        ij = np.concatenate((i[:, None], j[:, None]), axis=1)
+        ij = jnp.concatenate((i[:, None], j[:, None]), axis=1)
         return BCOO((a, ij), shape=(n, n))
 
     def to_dense(self) -> np.ndarray:
