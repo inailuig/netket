@@ -12,105 +12,124 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import jax
+import jax.numpy as jnp
 import numpy as np
-from numba.experimental import jitclass
-from numba import int64, float64
+
+from functools import wraps
+
+from netket.utils.types import DType
+from jax import Array
+
+# for __pre__init__
+from netket.utils.struct import dataclass as nk_struct_dataclass
+from flax import struct
+
+from .base import HilbertIndex
 
 
-spec = [
-    ("_local_states", float64[:]),
-    ("_local_size", int64),
-    ("_size", int64),
-    ("_basis", int64[:]),
-]
+@struct.dataclass
+class LookupTableHilbertIndex(HilbertIndex):
+    # TODO eventually add support for pytree states
+    _all_states : Array
+
+    def __post_init__(self, all_states: Array):
+        # ensure the local states are sorted
+        object.__setattr__(self, "_all_states", jnp.sort(self._all_states))
+
+    @property
+    def n_states(self) -> int:
+        return self._all_states.shape[0]
+
+    def numbers_to_states(self, numbers: Array) -> Array:
+        return self._all_states[numbers]
+
+    def states_to_numbers(self, states: Array) -> Array:
+        # TODO allow specifying method
+        return jnp.searchsorted(self._all_states, states)
+
+    def all_states(self) -> Array:
+        return self._all_states
 
 
-@jitclass(spec)
-class UnconstrainedHilbertIndex:
-    def __init__(self, local_states, size):
-        self._local_states = np.sort(local_states).astype(np.float64)
-        self._local_size = len(self._local_states)
-        self._size = size
+@struct.dataclass
+class IntegerHilbertIndex(HilbertIndex):
+    # Trivial index
 
-        self._basis = np.zeros(size, dtype=np.int64)
-        ba = 1
-        for s in range(size):
-            self._basis[s] = ba
-            ba *= self._local_size
+    n_states : int = struct.field(pytree_node=False)
 
-    def _local_state_number(self, x):
-        return np.searchsorted(self.local_states, x)
+    def numbers_to_states(self, numbers: Array) -> Array:
+        return numbers
+
+    def states_to_numbers(self, states: Array) -> Array:
+        return states
+
+    def all_states(self) -> Array:
+        return jnp.arange(n_states)
+
+
+@sturct.dataclass
+class UniformTensorProductHilbertIndex(HilbertIndex):
+    # tensor product with uniform local space
+
+    _local_index : HilbertIndex
+    _size : int
 
     @property
     def size(self) -> int:
         return self._size
 
     @property
+    def local_size(self) -> int:
+        return self._local_index.n_states
+
+    @property
     def n_states(self):
-        return self._local_size**self._size
+        return self.local_size**self._size
 
     @property
     def local_states(self):
-        return self._local_states
+        return self._local_index.all_states()
 
     @property
-    def local_size(self) -> int:
-        return self._local_size
+    def _basis(self):
+        return self.local_size**jax.lax.iota(int, self.size)[::-1]
 
-    def number_to_state(self, number, out=None):
+    def states_to_numbers(self, states):
+        local_numbers = self._local_index.states_to_numbers(states)
+        return local_numbers@self._basis
 
-        if out is None:
-            out = np.empty(self._size)
-        # else:
-        #     assert out.size == self._size
-
-        out.fill(self._local_states[0])
-
-        ip = number
-        k = self._size - 1
-        while ip > 0:
-            out[k] = self._local_states[ip % self._local_size]
-            ip = ip // self._local_size
-            k -= 1
-
-        return out
-
-    def states_to_numbers(self, states, out=None):
-        if states.ndim != 2:
-            raise RuntimeError("Invalid input shape, expecting a 2d array.")
-
-        if out is None:
-            out = np.empty(states.shape[0], np.int64)
-        # else:
-        #     assert out.size == states.shape[0]
-
-        for i in range(states.shape[0]):
-            out[i] = 0
-            for j in range(self._size):
-                out[i] += (
-                    self._local_state_number(states[i, self._size - j - 1])
-                    * self._basis[j]
-                )
-        return out
-
-    def numbers_to_states(self, numbers, out=None):
-        if numbers.ndim != 1:
-            raise RuntimeError("Invalid input shape, expecting a 1d array.")
-
-        if out is None:
-            out = np.empty((numbers.shape[0], self._size))
-        # else:
-        #     assert out.shape == (numbers.shape[0], self._size)
-
-        for i, n in enumerate(numbers):
-            out[i] = self.number_to_state(n)
-
-        return out
+    def numbers_to_states(self, numbers):
+        local_numbers = (numbers[..., None] // self._basis) % self.local_size
+        return self._local_index.numbers_to_states(local_numbers)
 
     def all_states(self, out=None):
-        if out is None:
-            out = np.empty((self.n_states, self._size))
+        return self.numbers_to_states(jnp.arange(self.n_states))
 
-        for i in range(self.n_states):
-            self.number_to_state(i, out[i])
-        return out
+
+@nk_struct_dataclass
+class UnconstrainedHilbertIndex(UniformTensorProductHilbertIndex):
+
+    def __pre_init__(self, local_states: Array, size: int):
+        # ensure the local states are sorted
+        return (LookupTableHilbertIndex(local_states), size), {}
+
+@nk_struct_dataclass
+class UnconstrainedHilbertIndexBoson(UniformTensorProductHilbertIndex):
+    # _size is inherited
+    n_max : int = struct.field(pytree_node=False)
+
+    # override _local_index
+    @property
+    def _local_index(self):
+        return IntegerHilbertIndex(self.n_max)
+
+    @property
+    def _dtype(self):
+        if n_max <= 256:
+            return jnp.uint8
+        # TODO 16 bit?
+        elif n_max <= 2**32:
+            return jnp.uint32
+        else:
+            return jnp.uint64
