@@ -22,7 +22,7 @@ from .homogeneous import HomogeneousHilbert
 class Qubit(HomogeneousHilbert):
     r"""Hilbert space obtained as tensor product of local qubit states."""
 
-    def __init__(self, N: int = 1):
+    def __init__(self, N: int = 1, dtype=jnp.uint8):
         r"""Initializes a qubit hilbert space.
 
         Args:
@@ -36,7 +36,7 @@ class Qubit(HomogeneousHilbert):
             >>> print(hi.size)
             100
         """
-        super().__init__([0.0, 1.0], N)
+        super().__init__([0.0, 1.0], N, dtype=dtype)
 
     def states_to_local_indices(self, x):
         return x.astype(np.int32)

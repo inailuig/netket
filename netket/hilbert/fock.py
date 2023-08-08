@@ -16,7 +16,6 @@ from typing import List, Optional, Union
 from functools import partial
 
 import numpy as np
-from numba import jit
 
 from .homogeneous import HomogeneousHilbert
 

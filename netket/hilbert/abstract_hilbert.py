@@ -36,8 +36,13 @@ class AbstractHilbert(abc.ABC):
     to be used as static arguments to `jax.jit` functions.
     """
 
-    def __init__(self):
+    def __init__(self, dtype=None):
+        self._dtype = dtype
         self._hash = None
+
+    @property
+    def dtype(self):
+        return self._dtype
 
     @property
     @abc.abstractmethod

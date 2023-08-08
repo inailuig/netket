@@ -21,13 +21,12 @@ from netket.utils.dispatch import dispatch
 
 
 @dispatch
-def random_state(hilb: Fock, key, batches: int, *, dtype=np.float32):
-    shape = (batches, hilb.size)
+def random_state(hilb: Fock, key, shape):
+
 
     # If unconstrained space, use fast sampling
     if hilb.n_particles is None:
-        rs = jax.random.randint(key, shape=shape, minval=0, maxval=hilb.n_max + 1)
-        return jnp.asarray(rs, dtype=dtype)
+        return _random_states(hilb, rngkey, shape)
 
     else:
         state = jax.pure_callback(
@@ -38,25 +37,43 @@ def random_state(hilb: Fock, key, batches: int, *, dtype=np.float32):
 
         return state
 
+@partial(jax.jit, static_argnames='shape')
+def _random_states(hilb, key, shape):
+    assert hilb.n_particles is None
+    return jax.random.randint(key, shape=shape+(hilb.size,), minval=0, maxval=hilb.n_max+1, dtype=hilb.dtype)
 
-def _random_states_with_constraint(hilb, rngkey, n_batches, dtype):
-    out = np.zeros((n_batches, hilb.size), dtype=dtype)
-    rgen = np.random.default_rng(np.asarray(rngkey))
+def _choice(key, p):
+    # p needs to be in [0, 1]
+    # p needs to be integer or bool
+    #
+    # TODO the following can probably be implemented more efficiently
+    n_candidates = p.sum(axis=-1)
+    p_padded = jnp.pad(p, [(0,0)]*(p.ndim-1)+[(1,0)])
+    cs = jnp.cumsum(p_padded, axis=-1)
+    n_candidates = cs[..., -1]
+    cs = cs[..., :-1]*p
+    r = jax.random.uniform(key, p.shape[:-1]) * n_candidates # 1 is exlusive
+    return cs == r.astype(cs.dtype)
 
-    for b in range(n_batches):
-        sites = list(range(hilb.size))
-        ss = hilb.size
 
-        for i in range(hilb.n_particles):
-            s = rgen.integers(0, ss, size=())
+@partial(jax.jit, static_argnames='shape')
+def _random_states_with_constraint(hilb, key, shape):
+    assert hilb.n_particles is not None
+    # distribute uniformly, excluding fully occupied sites
 
-            out[b, sites[s]] += 1
+    sites = jnp.arange(hilb.size)
 
-            if out[b, sites[s]] == hilb.n_max:
-                sites.pop(s)
-                ss -= 1
+    # use shape (per site n_max)
+    n_max = jnp.array(hilb.shape)-1
+    keys = jax.random.split(key, hilb.n_particles)
 
-    return out
+    def body_fun(x, key):
+        p = x < n_max
+        carry = x + _choice(key, p)
+        return carry, None
+
+    init = key, jnp.zeros(shape+(hilb.size,), dtype=hilb.dtype)
+    return jax.lax.scan(body_fun, init, keys)[0]
 
 
 @dispatch

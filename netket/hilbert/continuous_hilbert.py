@@ -26,7 +26,7 @@ class ContinuousHilbert(AbstractHilbert):
     in continuous space.
     """
 
-    def __init__(self, domain: Tuple[float, ...], pbc: Union[bool, Tuple[bool, ...]]):
+    def __init__(self, domain: Tuple[float, ...], pbc: Union[bool, Tuple[bool, ...]], dtype=None):
         """
         Constructs new ``Particles`` given specifications
          of the continuous space they are defined in.
@@ -42,6 +42,7 @@ class ContinuousHilbert(AbstractHilbert):
                 If tuple it must have the same length as domain. If bool the same value is used for all the dimensions
                 defined in domain.
         """
+
         self._extent = tuple(domain)
         self._pbc = tuple(pbc)
         if not len(self._extent) == len(self._pbc):
@@ -55,7 +56,11 @@ class ContinuousHilbert(AbstractHilbert):
                 "in that direction must be finite."
             )
 
-        super().__init__()
+        if dtype is None:
+            dtype = jax.types.result_type(domain)
+        # TODO: cast extent to dtype?
+
+        super().__init__(dtype)
 
     @property
     def extent(self) -> Tuple[float, ...]:

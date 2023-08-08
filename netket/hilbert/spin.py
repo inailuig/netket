@@ -50,9 +50,9 @@ def _check_total_sz(total_sz, S, size):
             )
 
 
-@jit(nopython=True)
 def _sum_constraint(x, total_sz):
     return np.sum(x, axis=1) == round(2 * total_sz)
+
 
 
 class Spin(HomogeneousHilbert):
@@ -63,6 +63,7 @@ class Spin(HomogeneousHilbert):
         s: float,
         N: int = 1,
         total_sz: Optional[float] = None,
+        dtype: Optional[Dtype] = jnp.int8,
     ):
         r"""Hilbert space obtained as tensor product of local spin states.
 
@@ -98,7 +99,7 @@ class Spin(HomogeneousHilbert):
         self._total_sz = total_sz
         self._s = s
 
-        super().__init__(local_states, N, constraints)
+        super().__init__(local_states, N, constraints, dtype=dtype)
 
     def __pow__(self, n):
         if not self.constrained:

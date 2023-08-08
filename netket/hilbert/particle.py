@@ -25,6 +25,7 @@ class Particle(ContinuousHilbert):
         N: Union[int, Tuple[int, ...]],
         L: Tuple[float, ...],
         pbc: Union[bool, Tuple[bool, ...]],
+        dtype : Optional[Dtype] = None
     ):
         """
         Constructs new ``Particles`` given specifications
@@ -62,7 +63,7 @@ class Particle(ContinuousHilbert):
         self._N = sum(N)
         self._n_per_spin = N
 
-        super().__init__(L, pbc)
+        super().__init__(L, pbc, dtype=dtype)
 
     @property
     def size(self) -> int:

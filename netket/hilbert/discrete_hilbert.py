@@ -44,7 +44,7 @@ class DiscreteHilbert(AbstractHilbert):
     interact with hilbert spaces on lattices.
     """
 
-    def __init__(self, shape: Tuple[int, ...]):
+    def __init__(self, shape: Tuple[int, ...], dtype : Optional[Dtype] = None):
         """
         Initializes a discrete Hilbert space with a basis of given shape.
 
@@ -54,7 +54,7 @@ class DiscreteHilbert(AbstractHilbert):
         """
         self._shape = tuple(shape)
 
-        super().__init__()
+        super().__init__(dtype=dtype)
 
     @property
     def shape(self) -> Tuple[int, ...]:

@@ -4,15 +4,20 @@ from functools import partial
 import jax.numpy as jnp
 
 
-@jax.jit
-def sort_lexicographic(x):
+@partial(jax.jit, static_argnames=('return_inverse',))
+def sort_lexicographic(x, return_inverse=False):
+    assert x.ndim == 2
     perm = jnp.lexsort(list(x.T)[::-1])
-    inverse = jnp.argsort(perm)
-    return x[perm], inverse
+    if return_inverse:
+        inverse = jnp.argsort(perm)
+        return x[perm], inverse
+    else:
+        return x[perm]
 
 # adapted from jax/jax/_src/numpy/lax_numpy.py
 
 def _less_equal_lexicographic(x_keys, y_keys):
+    assert x.shape == y.shape
     p = None
     for xk, yk in zip(x_keys[::-1], y_keys[::-1]):
         p = jax.lax.bitwise_or(jax.lax.lt(xk, yk), jax.lax.bitwise_and(jax.lax.eq(xk, yk), p)) if p is not None else jax.lax.le(xk, yk)
@@ -35,6 +40,9 @@ def _searchsorted_via_scan(sorted_arrquery, dtype=jnp.uint32, op=_less_equal_lex
 
 def searchsorted_lexicographic(a, v):
     # TODO due tue jax issue 17003 this currently gives wrong results on gpu
+    assert a.ndim == 2
+    assert v.ndim >= 2
+    assert a.shape[-1] == v.shape[-1]
     a = jnp.asarray(a)
     v = jnp.asarray(v)
     dtype = np.uint32 if len(a) <= np.iinfo(np.uint32).max else uint64

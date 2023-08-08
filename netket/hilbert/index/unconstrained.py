@@ -28,14 +28,26 @@ from flax import struct
 from .base import HilbertIndex
 
 
+def _sort(x):
+    if x.ndim == 1:
+        return jnp.sort(self._all_states)
+    else:
+        return sort_lexicographic(x)
+
+def _searchsorted(a, x):
+    if a.ndim == 1:
+        return jnp.searchsorted(a, x)
+    else:
+        return searchsorted_lexicographic(a, x)
+
 @struct.dataclass
 class LookupTableHilbertIndex(HilbertIndex):
     # TODO eventually add support for pytree states
     _all_states : Array
 
-    def __post_init__(self, all_states: Array):
+    def __post_init__(self):
         # ensure the local states are sorted
-        object.__setattr__(self, "_all_states", jnp.sort(self._all_states))
+        object.__setattr__(self, "_all_states", _sort(self._all_states)
 
     @property
     def n_states(self) -> int:
@@ -45,16 +57,15 @@ class LookupTableHilbertIndex(HilbertIndex):
         return self._all_states[numbers]
 
     def states_to_numbers(self, states: Array) -> Array:
-        # TODO allow specifying method
-        return jnp.searchsorted(self._all_states, states)
+        return _searchsorted(self._all_states, states)
 
     def all_states(self) -> Array:
         return self._all_states
 
 
 @struct.dataclass
-class IntegerHilbertIndex(HilbertIndex):
-    # Trivial index
+class UnsignedIntegerHilbertIndex(HilbertIndex):
+    # state and index are identical
 
     n_states : int = struct.field(pytree_node=False)
 
@@ -66,6 +77,7 @@ class IntegerHilbertIndex(HilbertIndex):
 
     def all_states(self) -> Array:
         return jnp.arange(n_states)
+
 
 
 @sturct.dataclass
@@ -111,8 +123,8 @@ class UniformTensorProductHilbertIndex(HilbertIndex):
 class UnconstrainedHilbertIndex(UniformTensorProductHilbertIndex):
 
     def __pre_init__(self, local_states: Array, size: int):
-        # ensure the local states are sorted
         return (LookupTableHilbertIndex(local_states), size), {}
+
 
 @nk_struct_dataclass
 class UnconstrainedHilbertIndexBoson(UniformTensorProductHilbertIndex):
@@ -122,7 +134,7 @@ class UnconstrainedHilbertIndexBoson(UniformTensorProductHilbertIndex):
     # override _local_index
     @property
     def _local_index(self):
-        return IntegerHilbertIndex(self.n_max)
+        return UnsignedIntegerHilbertIndex(self.n_max)
 
     @property
     def _dtype(self):
