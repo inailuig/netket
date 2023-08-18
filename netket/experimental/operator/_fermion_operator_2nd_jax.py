@@ -597,6 +597,7 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
             "constant": self._constant,
             "dtype": self.dtype,
             "max_conn_size": self._max_conn_size,
+            "kwargs": self._kwargs,
         }
         return data, metadata
 
@@ -608,6 +609,7 @@ class FermionOperator2ndJax(FermionOperator2ndBase, DiscreteJaxOperator):
         op = cls(hi, [], [], constant=constant, dtype=dtype)
         op._operators = metadata["operators"]
         op._max_conn_size = metadata["max_conn_size"]
+        op._kwargs = metadata["kwargs"]
         (op._terms_list_diag, op._terms_list_offdiag) = data
         op._initialized = True
         return op
