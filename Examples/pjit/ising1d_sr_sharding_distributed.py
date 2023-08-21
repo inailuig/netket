@@ -13,10 +13,10 @@ print(f"p{jax.process_index()} | global devices:", jax.devices())
 
 os.environ["NETKET_EXPERIMENTAL_PJIT"] = "1"
 
-import jax
-import netket as nk
-import jax.numpy as jnp
-from functools import partial
+import jax  # noqa: E402
+import netket as nk  # noqa: E402
+import jax.numpy as jnp  # noqa: E402
+from functools import partial  # noqa: E402
 
 L = 96
 n_chains_per_device = 1024
