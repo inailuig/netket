@@ -17,7 +17,7 @@ import abc
 import numpy as np
 import jax.numpy as jnp
 
-from jax.experimental.sparse import JAXSparse, BCOO
+from jax.experimental.sparse import JAXSparse, BCOO, BCSR
 
 from netket.operator import DiscreteOperator
 
@@ -187,7 +187,7 @@ class DiscreteJaxOperator(DiscreteOperator):
             out[:] = self.max_conn_size
         return out
 
-    def to_sparse(self) -> JAXSparse:
+    def to_sparse(self, batch_size=None, _csr=True) -> JAXSparse:
         r"""Returns the sparse matrix representation of the operator. Note that,
         in general, the size of the matrix is exponential in the number of quantum
         numbers, and this operation should thus only be performed for
@@ -200,12 +200,29 @@ class DiscreteJaxOperator(DiscreteOperator):
         """
         x = self.hilbert.all_states()
         n = x.shape[0]
-        xp, mels = self.get_conn_padded(x)
+
+        if batch_size is None:
+            xp, mels = self.get_conn_padded(x)
+            j = self.hilbert.states_to_numbers(xp).ravel()
+        else:
+            xs = jnp.array_split(x, max(1, n//batch_size))
+            js = []
+            melss = []
+            for x in xs:
+                xp, mels = self.get_conn_padded(x)
+                js.append(self.hilbert.states_to_numbers(xp))
+                melss.append(mels)
+            j = jnp.concatenate(js, axis=0).ravel()
+            mels = jnp.concatenate(melss, axis=0)
+
         a = mels.ravel()
-        i = np.broadcast_to(np.arange(n)[..., None], mels.shape).ravel()
-        j = self.hilbert.states_to_numbers(xp).ravel()
-        ij = np.concatenate((i[:, None], j[:, None]), axis=1)
-        return BCOO((a, ij), shape=(n, n))
+        i = jnp.broadcast_to(jnp.arange(n)[..., None], mels.shape).ravel()
+        ij = jnp.concatenate((i[:, None], j[:, None]), axis=1)
+        H = BCOO((a, ij), shape=(n, n)).sum_duplicates()
+        if _csr:
+            return BCSR.from_bcoo(H)
+        else:
+            return H
 
     def to_dense(self) -> np.ndarray:
         r"""Returns the dense matrix representation of the operator. Note that,
