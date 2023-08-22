@@ -16,16 +16,22 @@ from functools import lru_cache
 
 from .unconstrained import UnconstrainedHilbertIndex
 
+import jax
+import jax.numpy as jnp
+
 import numpy as np
 from jax.tree_util import Partial
 
+from typing import Tuple, Callable
+from netket.utils.types import Array, DType
 
 import itertools
 
+from flax import struct
 # for __pre__init__
 from netket.utils.struct import dataclass as nk_struct_dataclass
 
-def compute_constrained_to_bare_conversion_table(hilbert_index, constraint_fn, *, chunk_size: int = 65536):
+def compute_constrained_to_bare_conversion_table(hilbert_index, constraint_fun, *, chunk_size: int = 65536):
     """
     Computes the conversion table that converts the 'constrained' indices
     of an hilbert space to bare indices, so that routines generating
@@ -42,10 +48,10 @@ def compute_constrained_to_bare_conversion_table(hilbert_index, constraint_fn, *
         for i in range(n_chunks):
             id_start = chunk_size * i
             id_end = np.minimum(chunk_size * (i + 1), hilbert_index.n_states)
-            ids = jnp.arange(id_start, id_end)
+            ids = jnp.arange(id_start, id_end, dtype=hilbert_index.dtype)
             states = hilbert_index.numbers_to_states(ids)
-            # TODO jit the constraint_fn
-            is_constrained = constraint_fn(states)
+            # TODO jit the constraint_fun
+            is_constrained = constraint_fun(states)
             (chunk_bare_number,) = jnp.nonzero(is_constrained)
             bare_number_chunks.append(chunk_bare_number + id_start)
         bare_numbers = jnp.concatenate(bare_number_chunks)
@@ -55,14 +61,18 @@ def compute_constrained_to_bare_conversion_table(hilbert_index, constraint_fn, *
 @nk_struct_dataclass
 class ConstrainedHilbertIndex:
     _unconstrained_index : UnconstrainedHilbertIndex
-    _constraint_fn : Callable = struct.field(pytree_node=False)
+    _constraint_fun : Callable = struct.field(pytree_node=False)
     _bare_numbers : Array
 
-    def __pre_init__(self, local_states, size, constraint_fun, **kwargs):
-        hilbert_index = UnconstrainedHilbertIndex(local_states, size)
+    def __pre_init__(self, local_states, size, constraint_fun, dtype=None, **kwargs):
+        hilbert_index = UnconstrainedHilbertIndex(local_states, size, dtype)
         # TODO make it optional
-        bare_numbers = compute_constrained_to_bare_conversion_table(hilbert_index, constraint_fn, **kwargs)
+        bare_numbers = compute_constrained_to_bare_conversion_table(hilbert_index, constraint_fun, **kwargs)
         return (hilbert_index, constraint_fun, bare_numbers), {}
+
+    @property
+    def dtype(self):
+        return self._unconstrained_index.dtype
 
     @property
     def n_states(self):
@@ -87,7 +97,7 @@ class ConstrainedHilbertIndex:
     def numbers_to_states(self, numbers):
         # convert to original space
         numbers = self._bare_numbers[numbers]
-        return self._unconstrained_index.number_to_state(numbers[i])
+        return self._unconstrained_index.numbers_to_states(numbers)
 
     def all_states(self):
         return self.numbers_to_states(jnp.arange(self.n_states))
@@ -98,9 +108,9 @@ class ConstrainedHilbertIndex:
 
 @nk_struct_dataclass
 class SumConstrainedHilbertIndex:
-    shape : Tuple[int] = = struct.field(pytree_node=False)
+    shape : Tuple[int] = struct.field(pytree_node=False)
     n_particles : int = struct.field(pytree_node=False)
-    dtype : Dtype = struct.field(pytree_node=False)
+    dtype : DType = struct.field(pytree_node=False)
 
     @property
     def n_states(self):
@@ -123,8 +133,8 @@ class SumConstrainedHilbertIndex:
         raise NotImplementedError  # use to_lookup_table
 
     def _all_states(self):
-         c = jnp.repeat(jnp.eye(self.size, dtype=self.dtype), np.array(self.shape) - 1, axis=0)
-         combs = jnp.array(list(itertools.combinations(np.arange(len(c)), self.n_particles)))
+        c = jnp.repeat(jnp.eye(self.size, dtype=self.dtype), np.array(self.shape) - 1, axis=0)
+        combs = jnp.array(list(itertools.combinations(np.arange(len(c)), self.n_particles)))
         _all_states = c[combs].sum(axis=1, dtype=self.dtype)
         if (np.array(self.shape) > 1).any():
             with jax.ensure_compile_time_eval():

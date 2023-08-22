@@ -14,6 +14,7 @@
 
 from fractions import Fraction
 from typing import Optional, List, Union
+from netket.utils.types import DType
 from functools import partial
 
 import numpy as np
@@ -63,7 +64,7 @@ class Spin(HomogeneousHilbert):
         s: float,
         N: int = 1,
         total_sz: Optional[float] = None,
-        dtype: Optional[Dtype] = jnp.int8,
+        dtype: Optional[DType] = np.int8,
     ):
         r"""Hilbert space obtained as tensor product of local spin states.
 

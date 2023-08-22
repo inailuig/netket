@@ -17,6 +17,8 @@ def sort_lexicographic(x, return_inverse=False):
 # adapted from jax/jax/_src/numpy/lax_numpy.py
 
 def _less_equal_lexicographic(x_keys, y_keys):
+    # TODO raise an error if this is run on nvidia gpu with 0.4.6 < jaxlib.__version__ < 0.4.15,
+    # causing wrong results because of jax issue 17003
     assert x.shape == y.shape
     p = None
     for xk, yk in zip(x_keys[::-1], y_keys[::-1]):
@@ -39,7 +41,6 @@ def _searchsorted_via_scan(sorted_arrquery, dtype=jnp.uint32, op=_less_equal_lex
 
 
 def searchsorted_lexicographic(a, v):
-    # TODO due tue jax issue 17003 this currently gives wrong results on gpu
     assert a.ndim == 2
     assert v.ndim >= 2
     assert a.shape[-1] == v.shape[-1]

@@ -13,13 +13,17 @@
 # limitations under the License.
 
 from typing import List, Optional, Union
+from netket.utils.types import DType
 from functools import partial
 
+import jax
 import numpy as np
 
 from .homogeneous import HomogeneousHilbert
 
-FOCK_MAX = np.iinfo(np.intp).max - 1
+default_dtype = jax.dtypes.canonicalize_dtype(np.uint64)
+FOCK_MAX = np.iinfo(default_dtype).max
+
 """
 Maximum number of particles in the fock space.
 It is `maxvalue(np.int64)-1` because we use N+1 in several formulas
@@ -39,6 +43,7 @@ class Fock(HomogeneousHilbert):
         n_max: Optional[int] = None,
         N: int = 1,
         n_particles: Optional[int] = None,
+        dtype: Optional[DType] = None,
     ):
         r"""
         Constructs a new ``Boson`` given a maximum occupation number, number of sites
@@ -86,14 +91,32 @@ class Fock(HomogeneousHilbert):
             constraints = None
             self._n_particles = None
 
+        # TODO raise an error if float is used
+        # or, alternatively, find a way to compute largest int representable by it
+
         if self._n_max is not None:
             # assert self._n_max > 0
-            local_states = np.arange(self._n_max + 1)
+            if dtype is None:
+                if self._n_max < np.iinfo(np.uint8).max:
+                    dtype = np.uint8
+                # TODO use 16 bit too?
+                elif self._n_max < np.iinfo(np.uint32).max:
+                    dtype = np.uint32
+                else:
+                    dtype = default_dtype
+            # TODO check the corner case where _n_max is set to max uint64/uint32 possible
+            local_states = np.arange(self._n_max + 1, dtype=dtype)
+            if np.iinfo(dtype).max < self._n_max:
+                raise ValueError(f'cutoff is larger than representable by the dtype, n_max={self._n_max} but maximum representable by {dtype} is {np.iinfo(dtype).max}')
         else:
-            self._n_max = FOCK_MAX
             local_states = None
+            if dtype is None:
+                dtype = default_dtype
+                self._n_max = FOCK_MAX
+            else:
+                self._n_max = np.iinfo(dtype).max - 1
 
-        super().__init__(local_states, N, constraints)
+        super().__init__(local_states, N, constraints, dtype=dtype)
 
     @property
     def n_max(self) -> Optional[int]:

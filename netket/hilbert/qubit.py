@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from typing import Optional, Union, List
+from netket.utils.types import DType
 
 import numpy as np
 
@@ -22,7 +23,7 @@ from .homogeneous import HomogeneousHilbert
 class Qubit(HomogeneousHilbert):
     r"""Hilbert space obtained as tensor product of local qubit states."""
 
-    def __init__(self, N: int = 1, dtype=jnp.uint8):
+    def __init__(self, N: int = 1, dtype=np.uint8):
         r"""Initializes a qubit hilbert space.
 
         Args:

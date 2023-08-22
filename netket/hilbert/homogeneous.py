@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from typing import Optional, List, Callable
-
+from netket.utils.types import Array, DType
 from numbers import Real
 
 import numpy as np
@@ -50,7 +50,7 @@ class HomogeneousHilbert(DiscreteHilbert):
         local_states: Optional[List[Real]],
         N: int = 1,
         constraint_fn: Optional[Callable] = None,
-        dtype : Optional[Dtype] = None
+        dtype : Optional[DType] = None
     ):
         r"""
         Constructs a new ``HomogeneousHilbert`` given a list of eigenvalues of the
@@ -74,11 +74,8 @@ class HomogeneousHilbert(DiscreteHilbert):
             self._local_states = np.asarray(local_states)
             assert self._local_states.ndim == 1
             self._local_size = self._local_states.shape[0]
-            self._local_states = self._local_states.tolist()
-            self._local_states_frozen = frozenset(self._local_states)
         else:
             self._local_states = None
-            self._local_states_frozen = None
             self._local_size = np.iinfo(np.intp).max
 
         self._constraint_fn = constraint_fn
@@ -126,39 +123,22 @@ class HomogeneousHilbert(DiscreteHilbert):
         r"""Returns True if the hilbert space is constrained."""
         return self._constraint_fn is not None
 
-    def _numbers_to_states(self, numbers: np.ndarray, out: np.ndarray) -> np.ndarray:
+    def _numbers_to_states(self, numbers: np.ndarray) -> np.ndarray:
+        return self._hilbert_index.numbers_to_states(numbers)
 
-        # this is guaranteed
-        # numbers = concrete_or_error(
-        #    np.asarray, numbers, HilbertIndexingDuringTracingError
-        # )
+    def _states_to_numbers(self, states: np.ndarray):
+        return self._hilbert_index.states_to_numbers(states)
 
-        return self._hilbert_index.numbers_to_states(numbers, out)
-
-    def _states_to_numbers(self, states: np.ndarray, out: np.ndarray):
-
-        # guaranteed
-        # states = concrete_or_error(
-        #    np.asarray, states, HilbertIndexingDuringTracingError
-        # )
-
-        self._hilbert_index.states_to_numbers(states, out)
-
-        return out
-
-    def all_states(self, out: Optional[np.ndarray] = None) -> np.ndarray:
+    def all_states(self) -> np.ndarray:
         r"""Returns all valid states of the Hilbert space.
 
         Throws an exception if the space is not indexable.
-
-        Args:
-            out: an optional pre-allocated output array
 
         Returns:
             A (n_states x size) batch of states. this corresponds
             to the pre-allocated array if it was passed.
         """
-        return self._hilbert_index.all_states(out)
+        return self._hilbert_index.all_states()
 
     @property
     def _hilbert_index(self) -> HilbertIndex:
@@ -172,13 +152,13 @@ class HomogeneousHilbert(DiscreteHilbert):
 
             if self.constrained:
                 self.__hilbert_index = ConstrainedHilbertIndex(
-                    np.asarray(self.local_states, dtype=np.float64),
+                    np.asarray(self.local_states),
                     self.size,
                     self._constraint_fn,
                 )
             else:
                 self.__hilbert_index = UnconstrainedHilbertIndex(
-                    np.asarray(self.local_states, dtype=np.float64), self.size
+                    np.asarray(self.local_states), self.size
                 )
 
         return self.__hilbert_index
@@ -194,7 +174,7 @@ class HomogeneousHilbert(DiscreteHilbert):
         return (
             self.size,
             self.local_size,
-            self._local_states_frozen,
+            self._local_states,
             self.constrained,
             self._constraint_fn,
         )

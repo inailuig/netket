@@ -19,6 +19,8 @@ from jax import numpy as jnp
 from netket.hilbert import Fock
 from netket.utils.dispatch import dispatch
 
+from functools import partial
+
 
 @dispatch
 def random_state(hilb: Fock, key, shape):
@@ -61,7 +63,7 @@ def _random_states_with_constraint(hilb, key, shape):
     assert hilb.n_particles is not None
     # distribute uniformly, excluding fully occupied sites
 
-    sites = jnp.arange(hilb.size)
+    # sites = jnp.arange(hilb.size)
 
     # use shape (per site n_max)
     n_max = jnp.array(hilb.shape)-1

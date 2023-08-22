@@ -18,36 +18,40 @@ import numpy as np
 
 from functools import wraps
 
-from netket.utils.types import DType
-from jax import Array
+from typing import Tuple, Callable
+from netket.utils.types import Array, DType
 
+from flax import struct
 # for __pre__init__
 from netket.utils.struct import dataclass as nk_struct_dataclass
-from flax import struct
 
 from .base import HilbertIndex
 
 
 def _sort(x):
     if x.ndim == 1:
-        return jnp.sort(self._all_states)
+        return jnp.sort(x)
     else:
         return sort_lexicographic(x)
 
-def _searchsorted(a, x):
+def _searchsorted(a, x, dtype=None):
     if a.ndim == 1:
-        return jnp.searchsorted(a, x)
+        res = jnp.searchsorted(a, x)
     else:
-        return searchsorted_lexicographic(a, x)
+        res = searchsorted_lexicographic(a, x)
+    if dtype is not None:
+        res = res.astype(dtype)
+    return res
 
 @struct.dataclass
 class LookupTableHilbertIndex(HilbertIndex):
     # TODO eventually add support for pytree states
     _all_states : Array
+    _dtype : DType = struct.field(pytree_node=False)
 
     def __post_init__(self):
         # ensure the local states are sorted
-        object.__setattr__(self, "_all_states", _sort(self._all_states)
+        object.__setattr__(self, "_all_states", _sort(self._all_states))
 
     @property
     def n_states(self) -> int:
@@ -57,17 +61,31 @@ class LookupTableHilbertIndex(HilbertIndex):
         return self._all_states[numbers]
 
     def states_to_numbers(self, states: Array) -> Array:
-        return _searchsorted(self._all_states, states)
+        return _searchsorted(self._all_states, states, self._dtype)
 
     def all_states(self) -> Array:
         return self._all_states
 
+    @property
+    def dtype(self):
+        if self._dtype is None:
+            if self.n_states-1 <= np.iinfo(np.uint8).max:
+                return np.uint8
+            # TODO use 16 bit too?
+            elif self.n_states-1 <= np.iinfo(np.uint32).max:
+                return np.uint32
+            else:
+                # TODO check it's representable
+                return jax.dtypes.canonicalize_dtype(np.uint64)
+        else:
+            return self._dtype
 
 @struct.dataclass
 class UnsignedIntegerHilbertIndex(HilbertIndex):
     # state and index are identical
 
     n_states : int = struct.field(pytree_node=False)
+    dtype : DType = struct.field(pytree_node=False)
 
     def numbers_to_states(self, numbers: Array) -> Array:
         return numbers
@@ -76,20 +94,44 @@ class UnsignedIntegerHilbertIndex(HilbertIndex):
         return states
 
     def all_states(self) -> Array:
-        return jnp.arange(n_states)
+        if self.dtype is None:
+            if self.n_states -1 <= np.iinfo(np.uint8).max:
+                dtype = np.uint8
+            # TODO use 16 bit too?
+            elif self.n_states -1 <= np.iinfo(np.uint32).max:
+                dtype = np.uint32
+            else:
+                # TODO check it's representable
+                dtype = jax.dtypes.canonicalize_dtype(np.uint64)
+        return jnp.arange(n_states, dtype=dtype)
 
 
 
-@sturct.dataclass
+@struct.dataclass
 class UniformTensorProductHilbertIndex(HilbertIndex):
     # tensor product with uniform local space
 
     _local_index : HilbertIndex
-    _size : int
+    _size : int = struct.field(pytree_node=False)
+    _dtype : DType = struct.field(pytree_node=False)
 
     @property
     def size(self) -> int:
         return self._size
+
+    @property
+    def dtype(self) -> DType:
+        if self._dtype is None:
+            if self._size*self.local_size < np.iinfo(np.uint8).max:
+                return np.uint8
+            # TODO use 16 bit too?
+            elif self._size*self.local_size < np.iinfo(np.uint32).max:
+                return np.uint32
+            else:
+                # TODO check its representable
+                return jax.dtypes.canonicalize_dtype(np.uint64)
+        else:
+            return self._dtype
 
     @property
     def local_size(self) -> int:
@@ -113,17 +155,17 @@ class UniformTensorProductHilbertIndex(HilbertIndex):
 
     def numbers_to_states(self, numbers):
         local_numbers = (numbers[..., None] // self._basis) % self.local_size
-        return self._local_index.numbers_to_states(local_numbers)
+        return self._local_index.numbers_to_states(local_numbers.astype(self._local_index.dtype))
 
     def all_states(self, out=None):
-        return self.numbers_to_states(jnp.arange(self.n_states))
+        return self.numbers_to_states(jnp.arange(self.n_states, dtype=self.dtype))
 
 
 @nk_struct_dataclass
 class UnconstrainedHilbertIndex(UniformTensorProductHilbertIndex):
 
-    def __pre_init__(self, local_states: Array, size: int):
-        return (LookupTableHilbertIndex(local_states), size), {}
+    def __pre_init__(self, local_states: Array, size: int, dtype: DType = None, local_dtype: DType = None):
+        return (LookupTableHilbertIndex(local_states, local_dtype), size, dtype), {}
 
 
 @nk_struct_dataclass
@@ -134,14 +176,4 @@ class UnconstrainedHilbertIndexBoson(UniformTensorProductHilbertIndex):
     # override _local_index
     @property
     def _local_index(self):
-        return UnsignedIntegerHilbertIndex(self.n_max)
-
-    @property
-    def _dtype(self):
-        if n_max <= 256:
-            return jnp.uint8
-        # TODO 16 bit?
-        elif n_max <= 2**32:
-            return jnp.uint32
-        else:
-            return jnp.uint64
+        return UnsignedIntegerHilbertIndex(self.n_max, self._dtype)
