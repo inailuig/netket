@@ -16,6 +16,7 @@ from typing import Tuple, Union
 from .abstract_hilbert import AbstractHilbert
 
 import numpy as np
+import jax
 
 
 class ContinuousHilbert(AbstractHilbert):
@@ -57,7 +58,8 @@ class ContinuousHilbert(AbstractHilbert):
             )
 
         if dtype is None:
-            dtype = jax.types.result_type(domain)
+            domain_without_inf = [np.asarray(d) for d in jax.tree_leaves(domain) if d != np.inf]
+            dtype = jax.dtypes.result_type(*domain_without_inf)
         # TODO: cast extent to dtype?
 
         super().__init__(dtype)
