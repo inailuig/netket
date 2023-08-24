@@ -52,6 +52,8 @@ def _fun_sharding(vmapped_fun, chunk_size, argnums, *args, **kwargs):
     mesh = Mesh(jax.devices(), axis_names=("i"))
     in_specs = tuple(P("i") if i in argnums else P() for i, a in enumerate(args))
     out_specs = P("i")
+    # this fails if one of the args is not a jax.Array (e.g. a function)
+    # TODO figure out which partititon specs to pass for non-Arrays ???
     return shard_map(
         partial(_fun, vmapped_fun, chunk_size, argnums, **kwargs),
         mesh=mesh,
