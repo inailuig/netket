@@ -25,7 +25,7 @@ from netket.jax import (
     chunk,
 )
 
-from netket.utils import config
+# from netket.utils import config
 
 from jax.experimental.shard_map import shard_map
 from jax.sharding import Mesh, PartitionSpec as P
