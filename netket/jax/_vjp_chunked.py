@@ -2,7 +2,7 @@ import jax
 
 from jax.tree_util import Partial
 
-from functools import partial
+from functools import partial, wraps
 
 from netket.jax import (
     compose,
@@ -15,6 +15,12 @@ from netket.jax import (
 from ._scanmap import _multimap
 
 from ._chunk_utils import _chunk as _tree_chunk, _unchunk as _tree_unchunk
+
+from netket.utils import HashablePartial
+from netket.utils import config
+
+from jax.experimental.shard_map import shard_map
+from jax.sharding import Mesh, PartitionSpec as P
 
 
 def _trash_tuple_elements(t, nums=()):
@@ -61,6 +67,7 @@ def __vjp_fun_chunked(
     conjugate,
     _vjp,
     _append_cond_fun,
+    _do_psum=False,
 ):
 
     append_cond = _append_cond_fun(primals, nondiff_argnums, chunk_argnums)
@@ -78,7 +85,14 @@ def __vjp_fun_chunked(
         argnums=argnums,
     )(fun, cotangents, *primals)
 
-    return _multimap(lambda c, l: _tree_unchunk(l) if c else l, append_cond, res)
+    if _do_psum:
+        _tree_psum = partial(jax.tree_map, partial(jax.lax.psum, axis_name="i"))
+    else:
+        _tree_psum = lambda x: x
+
+    return _multimap(
+        lambda c, l: _tree_unchunk(l) if c else _tree_psum(l), append_cond, res
+    )
 
 
 def _gen_append_cond_vjp(primals, nondiff_argnums, chunk_argnums):
@@ -99,7 +113,7 @@ _value_and_vjp_fun_chunked = compose(
 )
 
 
-def vjp_chunked(
+def _vjp_chunked(
     fun,
     *primals,
     has_aux=False,
@@ -108,6 +122,7 @@ def vjp_chunked(
     nondiff_argnums=(),
     return_forward=False,
     conjugate=False,
+    _do_psum=False,
 ):
     """calculate the vjp in small chunks for a function where the leading dimension of the output only depends on the leading dimension of some of the arguments
 
@@ -227,6 +242,60 @@ def vjp_chunked(
             nondiff_argnums=nondiff_argnums,
             chunk_size=chunk_size,
             conjugate=conjugate,
+            _do_psum=_do_psum,
         ),
         primals,
     )
+
+
+def vjp_fun_sh(vjpc, mesh, in_specs, out_specs, primals, cotangents):
+    # vjpc is captured here
+    @partial(shard_map, mesh=mesh, in_specs=in_specs, out_specs=out_specs)
+    def _vjp_fun_sh(primals, cotangents):
+        vjp_fun = vjpc(*primals, _do_psum=True)
+        return vjp_fun(cotangents)
+
+    return _vjp_fun_sh(primals, cotangents)
+
+
+@wraps(_vjp_chunked)
+def vjp_chunked(
+    fun,
+    *primals,
+    has_aux=False,
+    chunk_argnums=(),
+    chunk_size=None,
+    nondiff_argnums=(),
+    return_forward=False,
+    conjugate=False,
+    axis_0_is_sharded=config.netket_experimental_pjit,
+):
+    _vjpc = HashablePartial(
+        _vjp_chunked,
+        fun,
+        has_aux=has_aux,
+        chunk_argnums=chunk_argnums,
+        chunk_size=chunk_size,
+        nondiff_argnums=nondiff_argnums,
+        return_forward=return_forward,
+        conjugate=conjugate,
+    )
+    if axis_0_is_sharded:
+
+        if isinstance(chunk_argnums, int):
+            chunk_argnums = (chunk_argnums,)
+
+        mesh = Mesh(jax.devices(), axis_names=("i"))
+        in_specs = tuple(
+            P("i") if i in chunk_argnums else P() for i, a in enumerate(primals)
+        ), P("i")
+        if return_forward:
+            out_specs = (P("i"), P())
+        else:
+            out_specs = P()
+        # mesh and specs have consistent hash
+        return Partial(
+            HashablePartial(vjp_fun_sh, _vjpc, mesh, in_specs, out_specs), primals
+        )
+    else:
+        return _vjpc(*primals)
