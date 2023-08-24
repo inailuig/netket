@@ -7,6 +7,11 @@ from ._chunk_utils import _chunk, _unchunk
 from ._scanmap import scanmap, scan_append
 
 from netket.utils import HashablePartial
+from netket.utils import config
+
+from jax.experimental.shard_map import shard_map
+from jax.sharding import Mesh, PartitionSpec as P
+from functools import partial
 
 
 def _fun(vmapped_fun, chunk_size, argnums, *args, **kwargs):
@@ -43,8 +48,23 @@ def _fun(vmapped_fun, chunk_size, argnums, *args, **kwargs):
     return y
 
 
+def _fun_sharding(vmapped_fun, chunk_size, argnums, *args, **kwargs):
+    mesh = Mesh(jax.devices(), axis_names=("i"))
+    in_specs = tuple(P("i") if i in argnums else P() for i, a in enumerate(args))
+    out_specs = P("i")
+    return shard_map(
+        partial(_fun, vmapped_fun, chunk_size, argnums, **kwargs),
+        mesh=mesh,
+        in_specs=in_specs,
+        out_specs=out_specs,
+    )(*args)
+
+
 def _chunk_vmapped_function(
-    vmapped_fun: Callable, chunk_size: Optional[int], argnums=0
+    vmapped_fun: Callable,
+    chunk_size: Optional[int],
+    argnums=0,
+    axis_0_is_sharded=False,
 ) -> Callable:
     """takes a vmapped function and computes it in chunks"""
 
@@ -53,8 +73,10 @@ def _chunk_vmapped_function(
 
     if isinstance(argnums, int):
         argnums = (argnums,)
-
-    return HashablePartial(_fun, vmapped_fun, chunk_size, argnums)
+    if axis_0_is_sharded:
+        return HashablePartial(_fun_sharding, vmapped_fun, chunk_size, argnums)
+    else:
+        return HashablePartial(_fun, vmapped_fun, chunk_size, argnums)
 
 
 def _parse_in_axes(in_axes):
@@ -70,7 +92,13 @@ def _parse_in_axes(in_axes):
     return in_axes, argnums
 
 
-def apply_chunked(f: Callable, in_axes=0, *, chunk_size: Optional[int]) -> Callable:
+def apply_chunked(
+    f: Callable,
+    in_axes=0,
+    *,
+    chunk_size: Optional[int],
+    axis_0_is_sharded=config.netket_experimental_pjit,
+) -> Callable:
     """
     Takes an implicitly vmapped function over the axis 0 and uses scan to
     do the computations in smaller chunks over the 0-th axis of all input arguments.
@@ -98,10 +126,16 @@ def apply_chunked(f: Callable, in_axes=0, *, chunk_size: Optional[int]) -> Calla
 
     """
     _, argnums = _parse_in_axes(in_axes)
-    return _chunk_vmapped_function(f, chunk_size, argnums)
+    return _chunk_vmapped_function(f, chunk_size, argnums, axis_0_is_sharded)
 
 
-def vmap_chunked(f: Callable, in_axes=0, *, chunk_size: Optional[int]) -> Callable:
+def vmap_chunked(
+    f: Callable,
+    in_axes=0,
+    *,
+    chunk_size: Optional[int],
+    axis_0_is_sharded=config.netket_experimental_pjit,
+) -> Callable:
     """
     Behaves like jax.vmap but uses scan to chunk the computations in smaller chunks.
 
@@ -124,4 +158,4 @@ def vmap_chunked(f: Callable, in_axes=0, *, chunk_size: Optional[int]) -> Callab
     """
     in_axes, argnums = _parse_in_axes(in_axes)
     vmapped_fun = jax.vmap(f, in_axes=in_axes)
-    return _chunk_vmapped_function(vmapped_fun, chunk_size, argnums)
+    return _chunk_vmapped_function(vmapped_fun, chunk_size, argnums, axis_0_is_sharded)
