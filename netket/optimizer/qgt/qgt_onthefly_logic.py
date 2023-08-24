@@ -154,7 +154,7 @@ def _Odagger_DeltaO_v(forward_fn, params, samples, v, chunk_size, pdf=None):
         w = w * (1.0 / (samples.shape[0] * mpi.n_nodes))
         w = subtract_mean(w)  # w/ MPI
     else:
-        w = pdf_ * (w - mpi.mpi_sum_jax(pdf @ w)[0])
+        w = pdf * (w - mpi.mpi_sum_jax(pdf @ w)[0])
     res = _OH_w(forward_fn, params, samples, w, chunk_size)
     return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # MPI
 
