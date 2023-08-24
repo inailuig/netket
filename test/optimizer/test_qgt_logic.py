@@ -270,12 +270,14 @@ def test_matvec(e, jit, chunk_size):
     def f(params_model_state, x):
         return e.f(params_model_state["params"], x)
 
+    samples = e.samples
     if chunk_size is None:
         mat_vec_factory = qgt_onthefly_logic.mat_vec_factory
-        samples = e.samples
+
     else:
-        mat_vec_factory = qgt_onthefly_logic.mat_vec_chunked_factory
-        samples = e.samples.reshape((-1, chunk_size) + e.samples.shape[1:])
+        mat_vec_factory = partial(
+            qgt_onthefly_logic.mat_vec_chunked_factory, chunk_size=chunk_size
+        )
 
     mv = mat_vec_factory(f, e.params, {}, samples)
     if jit:
@@ -297,12 +299,14 @@ def test_matvec_linear_transpose(e, jit, chunk_size):
     def f(params_model_state, x):
         return e.f(params_model_state["params"], x)
 
+    samples = e.samples
+
     if chunk_size is None:
         mat_vec_factory = qgt_onthefly_logic.mat_vec_factory
-        samples = e.samples
     else:
-        mat_vec_factory = qgt_onthefly_logic.mat_vec_chunked_factory
-        samples = e.samples.reshape((-1, chunk_size) + e.samples.shape[1:])
+        mat_vec_factory = partial(
+            qgt_onthefly_logic.mat_vec_chunked_factory, chunk_size=chunk_size
+        )
 
     mv = mat_vec_factory(f, e.params, {}, samples)
 
