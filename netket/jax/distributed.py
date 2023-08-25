@@ -1,7 +1,9 @@
 import jax
+import jax.numpy as jnp
 from functools import partial
 import numpy as np
 
+import math
 
 from jax.sharding import Mesh, PartitionSpec as P
 from jax.experimental.shard_map import shard_map
@@ -52,7 +54,11 @@ replicate_sharding = replicate_sharding_shmap
 _identity = lambda x: x
 
 
-def put_global(inp_data, axis=0):
+def _prepare_mask(n, n_pad):
+    return jnp.ones(n + n_pad, dtype=bool).at[-n_pad:].set(0)
+
+
+def put_global(inp_data, axis=0, pad=False, pad_value=None):
     """
     distribute a local array equally along an axis to all (local and global) devices
     The size of the axis needs to be divisible by the number of devices.
@@ -63,12 +69,31 @@ def put_global(inp_data, axis=0):
     returns:
         a distributed jax.Array
     """
+    if pad:
+        n = inp_data.shape[0]
+        # pad to the next multiple of device_count
+        device_count = jax.device_count()
+        n_pad = math.ceil(inp_data.shape[0] / device_count) * device_count - n
+        inp_data = jnp.pad(inp_data, ((0, n_pad), (0, 0)))
+        if pad_value is not None:
+            inp_data = inp_data.at[-n_pad:].set(pad_value)
+
     shape = [
         1,
     ] * inp_data.ndim
     shape[axis] = -1
     sharding = jax.sharding.PositionalSharding(jax.devices()).reshape(shape)
-    return jax.jit(_identity, out_shardings=sharding)(inp_data)
+    out_data = jax.jit(_identity, out_shardings=sharding)(inp_data)
+    if pad:
+        if n_pad > 0:
+            mask = jax.jit(
+                _prepare_mask, out_shardings=sharding.reshape(-1), static_argnums=(0, 1)
+            )(n, n_pad)
+        else:
+            mask = None
+        return out_data, mask
+    else:
+        return out_data
 
 
 def extract_replicated(t):
@@ -88,3 +113,7 @@ def extract_replicated(t):
             return x
 
     return jax.tree_map(_extract_replicated, t)
+
+
+def gather(x):
+    return jax.jit(_identity, out_shardings=x.sharding.replicate())(x)
