@@ -21,7 +21,9 @@ import numpy as np
 
 from .homogeneous import HomogeneousHilbert
 
-default_dtype = jax.dtypes.canonicalize_dtype(np.uint64)
+# TODO jax.random.randint overflows for uint64,
+# therefore we use the signed type here for now
+default_dtype = jax.dtypes.canonicalize_dtype(np.int64)
 FOCK_MAX = np.iinfo(default_dtype).max
 
 """
@@ -112,7 +114,15 @@ class Fock(HomogeneousHilbert):
             local_states = None
             if dtype is None:
                 dtype = default_dtype
-                self._n_max = FOCK_MAX
+
+            # jax.random.randint overflows for the signed types
+            # jax.random.randint(jax.random.PRNGKey(0), shape=(1,), minval=0, maxval=2**64-1, dtype=jnp.uint64)
+            # OverflowError: An overflow was encountered while parsing an argument to a jitted computation, whose argument path is maxval.
+            # so here we have to limit n_max
+            if dtype == np.uint64:
+                self._n_max = np.iinfo(np.int64).max - 1
+            elif dtype == np.uint32 and not jax.config.jax_enable_x64:
+                self._n_max = np.iinfo(np.int32).max - 1
             else:
                 self._n_max = np.iinfo(dtype).max - 1
 
