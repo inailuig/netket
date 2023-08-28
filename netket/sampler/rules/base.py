@@ -141,6 +141,4 @@ class MetropolisRule(abc.ABC):
             sampler_state: The current state of the sampler. Should not modify it.
             key: The PRNGKey to use to generate the random state.
         """
-        return sampler.hilbert.random_state(
-            key, size=sampler.n_batches, dtype=sampler.dtype
-        )
+        return sampler.hilbert.random_state(key, size=sampler.n_batches)

@@ -74,7 +74,6 @@ class ARDirectSampler(Sampler):
 
         Args:
             hilbert: The Hilbert space to sample.
-            dtype: The dtype of the states sampled (default = np.float64).
 
         Note:
             `ARDirectSampler.machine_pow` has no effect. Please set the model's `machine_pow` instead.
@@ -144,9 +143,7 @@ class ARDirectSampler(Sampler):
             else:
                 cache = None
 
-            local_states = jnp.asarray(
-                sampler.hilbert.local_states, dtype=sampler.dtype
-            )
+            local_states = sampler.hilbert.local_states
             new_σ = batch_choice(key, local_states, p)
             σ = σ.at[:, index].set(new_σ)
 

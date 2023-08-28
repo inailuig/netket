@@ -151,8 +151,6 @@ class MetropolisSampler(Sampler):
     where the probability being sampled from is :math:`P(s)=|M(s)|^p`. Here :math:`M(s)` is a
     user-provided function (the machine), :math:`p` is also user-provided with default value :math:`p=2`,
     and :math:`L(s,s^\prime)` is a suitable correcting factor computed by the transition kernel.
-
-    The dtype of the sampled states can be chosen.
     """
 
     rule: MetropolisRule = None
@@ -184,7 +182,6 @@ class MetropolisSampler(Sampler):
                 new sampling (default = False).
             machine_pow: The power to which the machine should be exponentiated to generate
                 the pdf (default = 2).
-            dtype: The dtype of the states sampled (default = np.float64).
         """
         # Validate the inputs
         if not isinstance(rule, MetropolisRule):

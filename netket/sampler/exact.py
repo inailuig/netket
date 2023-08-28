@@ -55,7 +55,6 @@ class ExactSampler(Sampler):
         Args:
             hilbert: The Hilbert space to sample.
             machine_pow: The power to which the machine should be exponentiated to generate the pdf (default = 2).
-            dtype: The dtype of the states sampled (default = np.float64).
         """
         if "n_chains" in kwargs or "n_chains_per_rank" in kwargs:
             warn_deprecation(

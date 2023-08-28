@@ -67,8 +67,6 @@ class Sampler(abc.ABC):
     machine_pow: int = struct.field(default=2)
     """The power to which the machine should be exponentiated to generate the pdf."""
 
-    dtype: DType = struct.field(pytree_node=False, default=np.float64)
-    """The dtype of the states sampled."""
 
     def __pre_init__(
         self, hilbert: AbstractHilbert, n_chains: Optional[int] = None, **kwargs
@@ -81,7 +79,6 @@ class Sampler(abc.ABC):
             n_chains: The total number of independent chains across all MPI ranks. Either specify this or `n_chains_per_rank`.
             n_chains_per_rank: Number of independent chains on every MPI rank (default = 1).
             machine_pow: The power to which the machine should be exponentiated to generate the pdf (default = 2).
-            dtype: The dtype of the states sampled (default = np.float64).
         """
 
         if "n_chains_per_rank" in kwargs:
@@ -136,6 +133,11 @@ class Sampler(abc.ABC):
                 raise ValueError(
                     f"machine_pow ({self.machine_pow}) must be a positive integer"
                 )
+
+    @property
+    def dtype(self):
+        # TODO eventually deprecate?
+        return self.hilbert.dtype
 
     @property
     def n_chains(self) -> int:
