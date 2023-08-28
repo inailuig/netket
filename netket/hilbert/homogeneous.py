@@ -125,39 +125,22 @@ class HomogeneousHilbert(DiscreteHilbert):
         r"""Returns True if the hilbert space is constrained."""
         return self._constraint_fn is not None
 
-    def _numbers_to_states(self, numbers: np.ndarray, out: np.ndarray) -> np.ndarray:
+    def _numbers_to_states(self, numbers: np.ndarray) -> np.ndarray:
+        return self._hilbert_index.numbers_to_states(numbers)
 
-        # this is guaranteed
-        # numbers = concrete_or_error(
-        #    np.asarray, numbers, HilbertIndexingDuringTracingError
-        # )
+    def _states_to_numbers(self, states: np.ndarray):
+        return self._hilbert_index.states_to_numbers(states)
 
-        return self._hilbert_index.numbers_to_states(numbers, out)
-
-    def _states_to_numbers(self, states: np.ndarray, out: np.ndarray):
-
-        # guaranteed
-        # states = concrete_or_error(
-        #    np.asarray, states, HilbertIndexingDuringTracingError
-        # )
-
-        self._hilbert_index.states_to_numbers(states, out)
-
-        return out
-
-    def all_states(self, out: Optional[np.ndarray] = None) -> np.ndarray:
+    def all_states(self) -> np.ndarray:
         r"""Returns all valid states of the Hilbert space.
 
         Throws an exception if the space is not indexable.
-
-        Args:
-            out: an optional pre-allocated output array
 
         Returns:
             A (n_states x size) batch of states. this corresponds
             to the pre-allocated array if it was passed.
         """
-        return self._hilbert_index.all_states(out)
+        return self._hilbert_index.all_states()
 
     @property
     def _hilbert_index(self) -> HilbertIndex:
@@ -171,13 +154,13 @@ class HomogeneousHilbert(DiscreteHilbert):
 
             if self.constrained:
                 self.__hilbert_index = ConstrainedHilbertIndex(
-                    np.asarray(self.local_states, dtype=np.float64),
+                    np.asarray(self.local_states),
                     self.size,
                     self._constraint_fn,
                 )
             else:
                 self.__hilbert_index = UnconstrainedHilbertIndex(
-                    np.asarray(self.local_states, dtype=np.float64), self.size
+                    np.asarray(self.local_states), self.size
                 )
 
         return self.__hilbert_index

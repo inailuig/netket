@@ -88,7 +88,7 @@ class TensorDiscreteHilbert(TensorHilbert, DiscreteHilbert):
             raise RuntimeError("The hilbert space is too large to be indexed.")
         return self._n_states
 
-    def _numbers_to_states(self, numbers, out):
+    def _numbers_to_states(self, numbers):
         # !!! WARNING
         # This code assumes that states are stored in a MSB
         # (Most Significant Bit) format.
@@ -110,20 +110,14 @@ class TensorDiscreteHilbert(TensorHilbert, DiscreteHilbert):
 
         return out
 
-    def _states_to_numbers(self, states, out):
-        out[:] = 0
-
-        temp = out.copy()
+    def _states_to_numbers(self, states):
 
         # !!! WARNING
         # See note above in numbers_to_states
-
+        out = 0
         for (i, dim) in enumerate(self._cum_ns_states_r):
-            self._hilbert_spaces[i].states_to_numbers(
-                states[:, self._cum_indices[i] : self._cum_sizes[i]], out=temp
-            )
+            temp = self._hilbert_spaces[i].states_to_numbers(states[:, self._cum_indices[i] : self._cum_sizes[i]])
             out += temp * dim
-
         return out
 
     def states_to_local_indices(self, x):

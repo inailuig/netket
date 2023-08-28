@@ -106,7 +106,7 @@ class DoubledHilbert(DiscreteHilbert):
     def n_states(self):
         return self.physical.n_states**2
 
-    def _numbers_to_states(self, numbers, out):
+    def _numbers_to_states(self, numbers):
         # !!! WARNING
         # This code assumes that states are stored in a MSB
         # (Most Significant Bit) format.
@@ -122,25 +122,19 @@ class DoubledHilbert(DiscreteHilbert):
         dim = self.physical.n_states
         left, right = np.divmod(numbers, dim)
 
-        self.physical.numbers_to_states(left, out=out[:, 0:n])
-        self.physical.numbers_to_states(right, out=out[:, n : 2 * n])
+        out_l = self.physical.numbers_to_states(left,)
+        out_r = self.physical.numbers_to_states(right)
+        return jnp.concatenate([out_l, out_r], axis=-1)
 
-        return out
-
-    def _states_to_numbers(self, states, out):
+    def _states_to_numbers(self, states):
         # !!! WARNING
         # See note above in numbers_to_states
 
         n = self.physical.size
         dim = self.physical.n_states
-
-        self.physical._states_to_numbers(states[:, 0:n], out=out)
-        _out_l = out * dim
-
-        self.physical._states_to_numbers(states[:, n : 2 * n], out=out)
-        out += _out_l
-
-        return out
+        out_l = self.physical._states_to_numbers(states[:, 0:n])
+        out_r = self.physical._states_to_numbers(states[:, n : 2 * n])
+        return out_l * dim + out_r
 
     def states_to_local_indices(self, x):
         return self.physical.states_to_local_indices(x)
