@@ -17,6 +17,7 @@ from textwrap import dedent
 from functools import reduce
 
 import numpy as np
+import jax.numpy as jnp
 
 from netket.utils.types import Array, DType
 from netket.utils.numbers import is_scalar
@@ -121,10 +122,6 @@ class DiscreteHilbert(AbstractHilbert):
                 quantum numbers.
         """
 
-        numbers = concrete_or_error(
-            np.asarray, numbers, HilbertIndexingDuringTracingError
-        )
-
         if np.any(numbers >= self.n_states):
             raise ValueError("numbers outside the range of allowed states")
 
@@ -148,10 +145,6 @@ class DiscreteHilbert(AbstractHilbert):
                 f"Size of this state ({states.shape[-1]}) not"
                 f"corresponding to this hilbert space {self.size}"
             )
-
-        states = concrete_or_error(
-            np.asarray, states, HilbertIndexingDuringTracingError
-        )
 
         states_r = jnp.reshape(states, (-1, states.shape[-1]))
 
@@ -181,7 +174,8 @@ class DiscreteHilbert(AbstractHilbert):
             A (n_states x size) batch of states. this corresponds
             to the pre-allocated array if it was passed.
         """
-        numbers = np.arange(0, self.n_states, dtype=np.int64)
+        index_dtype = np.uint64 # TODO set it properly
+        numbers = jnp.arange(0, self.n_states, dtype=index_dtype)
 
         return self.numbers_to_states(numbers)
 

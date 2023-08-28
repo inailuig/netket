@@ -16,16 +16,22 @@ from functools import lru_cache
 
 from .unconstrained import UnconstrainedHilbertIndex
 
+import jax
+import jax.numpy as jnp
+
 import numpy as np
+from jax.tree_util import Partial
 
+from typing import Tuple, Callable
+from netket.utils.types import Array, DType
 
-# This function has exponential runtime in self.size, so we cache it in order to
-# only compute it once.
-# TODO: distribute over MPI... chose better chunk size
-@lru_cache(maxsize=5)
-def compute_constrained_to_bare_conversion_table(
-    hilbert_index, constraint_fn, *, chunk_size: int = 100000
-):
+import itertools
+
+from flax import struct
+# for __pre__init__
+from netket.utils.struct import dataclass as nk_struct_dataclass
+
+def compute_constrained_to_bare_conversion_table(hilbert_index, constraint_fun, *, chunk_size: int = 65536):
     """
     Computes the conversion table that converts the 'constrained' indices
     of an hilbert space to bare indices, so that routines generating
@@ -36,84 +42,104 @@ def compute_constrained_to_bare_conversion_table(
     and is likely wrong.
     """
 
-    n_chunks = int(np.ceil(hilbert_index.n_states / chunk_size))
-    bare_number_chunks = []
-    for i in range(n_chunks):
-        id_start = chunk_size * i
-        id_end = np.minimum(chunk_size * (i + 1), hilbert_index.n_states)
-        ids = np.arange(id_start, id_end)
+    with jax.ensure_compile_time_eval():
+        n_chunks = int(np.ceil(hilbert_index.n_states / chunk_size))
+        bare_number_chunks = []
+        for i in range(n_chunks):
+            id_start = chunk_size * i
+            id_end = np.minimum(chunk_size * (i + 1), hilbert_index.n_states)
+            ids = jnp.arange(id_start, id_end, dtype=hilbert_index.index_dtype)
+            states = hilbert_index.numbers_to_states(ids)
+            # TODO jit the constraint_fun
+            is_constrained = constraint_fun(states)
+            (chunk_bare_number,) = jnp.nonzero(is_constrained)
+            bare_number_chunks.append(chunk_bare_number + id_start)
+        bare_numbers = jnp.concatenate(bare_number_chunks)
+    return bare_numbers
 
-        states = hilbert_index.numbers_to_states(ids)
-        is_constrained = constraint_fn(states)
-        (chunk_bare_number,) = np.nonzero(is_constrained)
-        bare_number_chunks.append(chunk_bare_number + id_start)
 
-    return np.concatenate(bare_number_chunks)
-
-
+@nk_struct_dataclass
 class ConstrainedHilbertIndex:
-    def __init__(self, local_states, size, constraint_fun):
-        self._unconstrained_index = UnconstrainedHilbertIndex(local_states, size)
-        self._constraint_fn = constraint_fun
+    _unconstrained_index : UnconstrainedHilbertIndex
+    _constraint_fun : Callable = struct.field(pytree_node=False)
+    _bare_numbers : Array
 
-        self.__bare_numbers = None
+    def __pre_init__(self, local_states, size, constraint_fun, dtype=None, **kwargs):
+        hilbert_index = UnconstrainedHilbertIndex(local_states, size, dtype)
+        # TODO make it optional
+        bare_numbers = compute_constrained_to_bare_conversion_table(hilbert_index, constraint_fun, **kwargs)
+        return (hilbert_index, constraint_fun, bare_numbers), {}
 
     @property
-    def size(self) -> int:
-        return self._unconstrained_index.size
+    def dtype(self):
+        return self._unconstrained_index.index_dtype
 
     @property
     def n_states(self):
         return self._bare_numbers.shape[0]
 
     @property
-    def local_states(self):
-        return self._unconstrained_index._local_states
+    def size(self) -> int:
+        return self._unconstrained_index.size
+
+    @property
+    def local_states(self) -> Array:
+        return self._unconstrained_index.local_states
 
     @property
     def local_size(self) -> int:
         return self._unconstrained_index.local_size
 
-    @property
-    def _bare_numbers(self) -> np.ndarray:
-        """
-        Returns the conversion table between indices in the constrained space and
-        the corresponding unconstrained space.
-        """
-        if self.__bare_numbers is None:
-            self.__bare_numbers = compute_constrained_to_bare_conversion_table(
-                self._unconstrained_index, self._constraint_fn
-            )
+    def states_to_numbers(self, states):
+        out = self._unconstrained_index.states_to_numbers(states)
+        return jnp.searchsorted(self._bare_numbers, out)
 
-        return self.__bare_numbers
-
-    def states_to_numbers(self, states, out=None):
-
-        self._unconstrained_index.states_to_numbers(states, out)
-
-        out[:] = np.searchsorted(self._bare_numbers, out)
-
-        if np.max(out) >= self.n_states:
-            raise RuntimeError(
-                "The required state does not satisfy " "the given constraints."
-            )
-
-        return out
-
-    def numbers_to_states(self, numbers, out=None):
-        if numbers.ndim != 1:
-            raise RuntimeError("Invalid input shape, expecting a 1d array.")
-
+    def numbers_to_states(self, numbers):
         # convert to original space
         numbers = self._bare_numbers[numbers]
+        return self._unconstrained_index.numbers_to_states(numbers)
 
-        if out is None:
-            out = np.empty((numbers.shape[0], self.size))
+    def all_states(self):
+        return self.numbers_to_states(jnp.arange(self.n_states))
 
-        for i in range(numbers.shape[0]):
-            out[i] = self._unconstrained_index.number_to_state(numbers[i])
+    def to_lookup_table(self):
+        return LookupTableHilbertIndex(self.all_states())
 
-        return out
 
-    def all_states(self, out=None):
-        return self.numbers_to_states(np.arange(self.n_states), out=out)
+@nk_struct_dataclass
+class SumConstrainedHilbertIndex:
+    shape : Tuple[int] = struct.field(pytree_node=False)
+    n_particles : int = struct.field(pytree_node=False)
+    index_dtype : DType = struct.field(pytree_node=False)
+
+    @property
+    def n_states(self):
+        if self.n_max == 1:
+            return math.comb(self.size, self.n_particles)
+        else:
+            raise NotImplementedError  # use to_lookup_table
+
+    @property
+    def size(self):
+        return len(self.shape)
+
+    def states_to_numbers(self, states):
+        raise NotImplementedError  # use to_lookup_table
+
+    def numbers_to_states(self, numbers):
+        raise NotImplementedError  # use to_lookup_table
+
+    def all_states(self):
+        raise NotImplementedError  # use to_lookup_table
+
+    def _all_states(self):
+        c = jnp.repeat(jnp.eye(self.size, dtype=self.index_dtype), np.array(self.shape) - 1, axis=0)
+        combs = jnp.array(list(itertools.combinations(np.arange(len(c)), self.n_particles)))
+        _all_states = c[combs].sum(axis=1, dtype=self.index_dtype)
+        if (np.array(self.shape) > 1).any():
+            with jax.ensure_compile_time_eval():
+                _all_states = jnp.unique(_all_states, axis=0)
+        return jnp.asarray(_all_states)
+
+    def to_lookup_table(self):
+        return LookupTableHilbertIndex(self._all_states())
