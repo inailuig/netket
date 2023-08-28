@@ -30,7 +30,7 @@ def take_sub(key, x, n):
 
 
 @dispatch
-def random_state(hilb: Particle, key, batches: int, *, dtype):
+def random_state(hilb: Particle, key, batches: int):
     """If no periodic boundary conditions are present particles are positioned normally distributed around the origin.
 
     If periodic boundary conditions are present the particles are positioned uniformly inside the box and a small
@@ -52,7 +52,7 @@ def random_state(hilb: Particle, key, batches: int, *, dtype):
 
     # use real dtypes because this does not work with complex ones.
     gaussian = jax.random.normal(
-        key, shape=(batches, hilb.size), dtype=nkjax.dtype_real(dtype)
+        key, shape=(batches, hilb.size), dtype=nkjax.dtype_real(hilb.dtype)
     )
 
     width = min_modulus / (4.0 * hilb.n_particles)
@@ -76,7 +76,7 @@ def random_state(hilb: Particle, key, batches: int, *, dtype):
     ).reshape(batches, -1)
     rs = jnp.where(np.equal(boundary, False), gaussian, (uniform + noise) % modulus)
 
-    return jnp.asarray(rs, dtype=dtype)
+    return rs.astype(hilb.dtype)
 
 
 @dispatch

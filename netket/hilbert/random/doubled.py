@@ -23,11 +23,11 @@ from .base import flip_state_scalar, random_state
 
 
 @dispatch
-def random_state(hilb: DoubledHilbert, key, batches: int, *, dtype):  # noqa: F811
+def random_state(hilb: DoubledHilbert, key, batches: int):  # noqa: F811
     key1, key2 = jax.random.split(key)
 
-    v1 = random_state(hilb.physical, key1, batches, dtype)
-    v2 = random_state(hilb.physical, key2, batches, dtype)
+    v1 = random_state(hilb.physical, key1, batches)
+    v2 = random_state(hilb.physical, key2, batches)
 
     return jnp.concatenate([v1, v2], axis=-1)
 

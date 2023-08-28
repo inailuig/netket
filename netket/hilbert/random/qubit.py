@@ -20,9 +20,14 @@ from netket.utils.dispatch import dispatch
 
 
 @dispatch
-def random_state(hilb: Qubit, key, batches: int, *, dtype):
-    rs = jax.random.randint(key, shape=(batches, hilb.size), minval=0, maxval=2)
-    return jnp.asarray(rs, dtype=dtype)
+def random_state(hilb: Qubit, key, batches: int):
+    shape = (batches,)
+    # we special case for float here (use int/bool and cast)
+    if jnp.issubdtype(hilb.dtype, jnp.integer):
+        return jax.random.randint(key, shape=shape+(hilb.size,), minval=0, maxval=2, dtype=hilb.dtype)
+    else:
+        rs = jax.random.randint(key, shape=shape+(hilb.size,), minval=0, maxval=2)
+        return rs.astype(hilb.dtype)
 
 
 @dispatch

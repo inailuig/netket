@@ -20,7 +20,7 @@ from netket.utils.dispatch import dispatch
 
 
 @dispatch
-def random_state(hilb: CustomHilbert, key, batches: int, *, dtype):
+def random_state(hilb: CustomHilbert, key, batches: int):
     if not hilb.is_finite or hilb.constrained:
         raise NotImplementedError()
 
@@ -29,18 +29,18 @@ def random_state(hilb: CustomHilbert, key, batches: int, *, dtype):
 
     σ = jax.random.choice(
         key,
-        jnp.asarray(hilb.local_states, dtype=dtype),
+        jnp.asarray(hilb.local_states, dtype=hilb.dtype),
         shape=(batches, hilb.size),
         replace=True,
     )
-    return jnp.asarray(σ, dtype=dtype)
+    return σ
 
 
 @dispatch
 def flip_state_scalar(hilb: CustomHilbert, key, σ, indx):
-    local_states = jnp.asarray(hilb.local_states)
+    local_states = jnp.asarray(hilb.local_states, dtype=hilb.dtype)
 
-    rs = jax.random.randint(key, shape=(), minval=0, maxval=len(hilb.local_states) - 1)
+    rs = jax.random.randint(key, shape=(), minval=0, maxval=len(local_states) - 1)
 
     new_val = local_states[rs + (local_states[rs] >= σ[indx])]
     return σ.at[indx].set(new_val), σ[indx]
@@ -50,10 +50,10 @@ def flip_state_scalar(hilb: CustomHilbert, key, σ, indx):
 def flip_state_batch(hilb: CustomHilbert, key, σ, indxs):
     n_batches = σ.shape[0]
 
-    local_states = jnp.asarray(hilb.local_states)
+    local_states = jnp.asarray(hilb.local_states, dtype=hilb.dtype)
 
     rs = jax.random.randint(
-        key, shape=(n_batches,), minval=0, maxval=len(hilb.local_states) - 1
+        key, shape=(n_batches,), minval=0, maxval=len(local_states) - 1
     )
 
     def scalar_update_fun(σ, indx, rs):

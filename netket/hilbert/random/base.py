@@ -24,7 +24,7 @@ Dim = Union[Tuple[int], Tuple[int, int], Tuple[int, int, int]]
 
 
 @dispatch
-def random_state(hilb, key, *, size=None, dtype=np.float32):
+def random_state(hilb, key, *, size=None):
     r"""Generates either a single or a batch of uniformly distributed random states.
 
     Args:
@@ -34,7 +34,6 @@ def random_state(hilb, key, *, size=None, dtype=np.float32):
             size is an integer or `(*size, #)` if it is a tuple and where `#` is the Hilbert
             space size. By default, a single random configuration with shape `(#,)` is
             returned.
-        dtype: The dtype of the resulting states.
 
     Example:
 
@@ -46,31 +45,23 @@ def random_state(hilb, key, *, size=None, dtype=np.float32):
         [[0. 1.]
          [0. 0.]]
     """
-    return random_state(hilb, key, size, dtype=dtype)
+    return random_state(hilb, key, size)
 
 
 @dispatch
-def random_state(hilb, key, size, dtype):  # noqa: F811
-    return random_state(hilb, key, size, dtype=dtype)
-
-
-@dispatch
-def random_state(hilb, key, size: None, *, dtype):  # noqa: F811
-    return random_state(hilb, key, 1, dtype=dtype)[0]
-
+def random_state(hilb, key, size):  # noqa: F811
+    return random_state(hilb, key, size=size)
 
 @dispatch
-def random_state(hilb, key, size: Dim, *, dtype):  # noqa: F811
-    n = int(np.prod(size))
-    return random_state(hilb, key, n, dtype=dtype).reshape(*size, -1)
-
+def random_state(hilb, key, size: None):  # noqa: F811
+    return random_state(hilb, key, 1)[0]
 
 @dispatch
-def random_state(hilb, key, size: int, *, dtype):  # noqa: F811
+def random_state(hilb, key, size: int):  # noqa: F811
     raise NotImplementedError(
         dedent(
             f"""
-            random_state(hilb, key, size : int, *, dtype) is not implemented for the
+            random_state(hilb, key, size : int) is not implemented for the
             hilbert space {type(hilb)}.
 
             Define the above function as follows:
@@ -83,17 +74,6 @@ def random_state(hilb, key, size: int, *, dtype):  # noqa: F811
         """
         )
     )
-
-
-@dispatch
-def random_state(hilb, key, size: None, *, dtype):  # noqa: F811
-    return random_state(hilb, key, 1, dtype=dtype)[0]
-
-
-@dispatch
-def random_state(hilb, key, size: Dim, *, dtype):  # noqa: F811
-    n = int(np.prod(size))
-    return random_state(hilb, key, n, dtype=dtype).reshape(*size, -1)
 
 
 def flip_state(hilb, key, state, indices):
