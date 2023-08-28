@@ -17,8 +17,8 @@ from netket.utils.dispatch import dispatch
 
 
 @dispatch
-def random_state(hilb: SpinOrbitalFermions, key, batches: int, *, dtype):
-    return random_state(hilb._fock, key, batches, dtype)
+def random_state(hilb: SpinOrbitalFermions, key, batches: int):
+    return random_state(hilb._fock, key, batches)
 
 
 @dispatch

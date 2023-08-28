@@ -17,6 +17,8 @@ from collections.abc import Iterable
 import numpy as np
 from fractions import Fraction
 
+from netket.utils.types import DType
+
 from netket.hilbert.fock import Fock
 from netket.hilbert.tensor_hilbert_discrete import TensorDiscreteHilbert
 from netket.hilbert.homogeneous import HomogeneousHilbert
@@ -42,6 +44,7 @@ class SpinOrbitalFermions(HomogeneousHilbert):
         n_orbitals: int,
         s: float = None,
         n_fermions: Optional[Union[int, List[int]]] = None,
+        dtype: Optional[DType] = None
     ):
         r"""
         Constructs the hilbert space for spin-`s` fermions on `n_orbitals`.
@@ -92,7 +95,7 @@ class SpinOrbitalFermions(HomogeneousHilbert):
             spin_hilberts = [
                 Fock(n_max=1, N=n_orbitals, n_particles=Nf) for Nf in n_fermions
             ]
-            hilbert = TensorDiscreteHilbert(*spin_hilberts)
+            hilbert = TensorDiscreteHilbert(*spin_hilberts, dtype=dtype)
 
         self._fock = hilbert
         """Internal representation of this Hilbert space (Fock or TensorHilbert)."""
@@ -100,7 +103,7 @@ class SpinOrbitalFermions(HomogeneousHilbert):
         local_states = np.array((0.0, 1.0))
 
         # we use the constraints from the Fock spaces, and override `constrained`
-        super().__init__(local_states, N=total_size, constraint_fn=None)
+        super().__init__(local_states, N=total_size, constraint_fn=None, dtype=self._fock.dtype)
         self._s = s
         self.n_fermions = n_fermions
         self.n_orbitals = n_orbitals
