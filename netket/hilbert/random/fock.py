@@ -35,7 +35,10 @@ def random_state(hilb: Fock, key, batches: int):
 @partial(jax.jit, static_argnames=('hilb','shape'))
 def _random_states(hilb, key, shape):
     assert hilb.n_particles is None
-    return jax.random.randint(key, shape=shape+(hilb.size,), minval=0, maxval=hilb.n_max+1, dtype=hilb.dtype)
+    if jnp.issubdtype(hilb.dtype, jnp.integer):
+        return jax.random.randint(key, shape=shape+(hilb.size,), minval=0, maxval=hilb.n_max+1, dtype=hilb.dtype)
+    else:
+        return jax.random.randint(key, shape=shape+(hilb.size,), minval=0, maxval=hilb.n_max+1).astype(hilb.dtype)
 
 def _choice(key, p):
     # p needs to be in [0, 1], of type integer or bool
