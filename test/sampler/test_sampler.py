@@ -148,7 +148,7 @@ samplers[
 
 # TensorHilbert sampler
 hi = nk.hilbert.Spin(0.5, 4) * nk.hilbert.Fock(3)
-samplers["Metropolis(TensorRule): Spin x Fock"] = nk.sampler.MetropolisSampler(
+samplers["Metropolis(TensorRule, LocalRule): Spin x Fock"] = nk.sampler.MetropolisSampler(
     hi,
     nk.sampler.rules.TensorRule(
         hi, [nk.sampler.rules.LocalRule(), nk.sampler.rules.LocalRule()]
@@ -158,7 +158,7 @@ samplers["Metropolis(TensorRule): Spin x Fock"] = nk.sampler.MetropolisSampler(
 # TensorHilbert sampler
 hi = nk.hilbert.Spin(0.5, 4) * nk.hilbert.Fock(3)
 ha = sum(nk.operator.spin.sigmax(nk.hilbert.Spin(0.5, 4), i) for i in range(4))
-samplers["Metropolis(TensorRule): Spin x Fock"] = nk.sampler.MetropolisSampler(
+samplers["Metropolis(TensorRule, HamiltonianRule): Spin x Fock"] = nk.sampler.MetropolisSampler(
     hi,
     nk.sampler.rules.TensorRule(
         hi, [nk.sampler.rules.HamiltonianRule(ha), nk.sampler.rules.LocalRule()]
@@ -248,7 +248,7 @@ def test_states_in_hilbert(sampler, model_and_weights):
         for sample in sampler.samples(ma, w, chain_length=50):
             assert sample.shape == (sampler.n_chains, hi.size)
             for v in sample:
-                assert v in all_states
+                assert np.array(v) in np.array(all_states)
 
     elif isinstance(hi, Particle):
         ma, w = model_and_weights(hi, sampler)

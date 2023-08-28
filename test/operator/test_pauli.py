@@ -34,7 +34,7 @@ def test_pauli_tensorhilbert():
     sp, _ = op.get_conn_padded(s)
     sp = sp.reshape(-1, 3)
     for _s in sp:
-        assert _s in s
+        assert np.array(_s) in np.array(s)
 
 
 @pytest.mark.parametrize(

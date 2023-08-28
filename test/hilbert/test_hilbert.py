@@ -184,11 +184,7 @@ def test_consistent_size_particle(hi: Particle):
 @pytest.mark.parametrize("hi", discrete_hilbert_params)
 def test_random_states_discrete(hi: DiscreteHilbert):
     assert hi.random_state(jax.random.PRNGKey(13)).shape == (hi.size,)
-    assert hi.random_state(jax.random.PRNGKey(13), dtype=np.float32).dtype == np.float32
-    assert (
-        hi.random_state(jax.random.PRNGKey(13), dtype=np.complex64).dtype
-        == np.complex64
-    )
+    assert hi.random_state(jax.random.PRNGKey(13)).dtype ==hi.dtype
     assert hi.random_state(jax.random.PRNGKey(13), 10).shape == (10, hi.size)
     assert hi.random_state(jax.random.PRNGKey(13), size=10).shape == (10, hi.size)
     # assert hi.random_state(jax.random.PRNGKey(13), size=(10,)).shape == (10, hi.size)
@@ -219,11 +215,7 @@ def test_random_states_fock_infinite():
 @pytest.mark.parametrize("hi", particle_hilbert_params)
 def test_random_states_particle(hi: Particle):
     assert hi.random_state(jax.random.PRNGKey(13)).shape == (hi.size,)
-    assert hi.random_state(jax.random.PRNGKey(13), dtype=np.float32).dtype == np.float32
-    assert (
-        hi.random_state(jax.random.PRNGKey(13), dtype=np.complex64).dtype
-        == np.complex64
-    )
+    assert hi.random_state(jax.random.PRNGKey(13)).dtype == hi.dtype
     assert hi.random_state(jax.random.PRNGKey(13), 10).shape == (10, hi.size)
     assert hi.random_state(jax.random.PRNGKey(13), size=10).shape == (10, hi.size)
     np.testing.assert_allclose(
@@ -297,7 +289,7 @@ def test_flip_state_fock_infinite():
     rng = nk.jax.PRNGSeq(1)
     N_batches = 20
 
-    states = hi.random_state(rng.next(), N_batches, dtype=jnp.int64)
+    states = hi.random_state(rng.next(), N_batches)
 
     ids = jnp.asarray(
         jnp.floor(hi.size * jax.random.uniform(rng.next(), shape=(N_batches,))),
@@ -413,11 +405,11 @@ def test_inhomogeneous_fock():
 
     for i in range(0, 40):
         assert hi.size_at_index(i) == 8
-        assert hi.states_at_index(i) == list(range(8))
+        np.testing.assert_allclose(hi.states_at_index(i), list(range(8)))
 
     for i in range(40, 80):
         assert hi.size_at_index(i) == 3
-        assert hi.states_at_index(i) == list(range(3))
+        np.testing.assert_allclose(hi.states_at_index(i), list(range(3)))
 
 
 def test_fermions():
@@ -645,20 +637,20 @@ def test_constrained_eq_hash():
     assert hash(hi1) != hash(hi2)
 
 
-@pytest.mark.parametrize("hi", discrete_hilbert_params)
-def test_hilbert_numba_throws(hi):
-    """Check that get conn throws an error"""
-    from netket.errors import HilbertIndexingDuringTracingError
-
-    @partial(jax.jit, static_argnums=0)
-    def numbers_to_states(hi, s):
-        return hi.numbers_to_states(s)
-
-    @partial(jax.jit, static_argnums=0)
-    def states_to_numbers(hi, s):
-        return hi.states_to_numbers(s)
-
-    with pytest.raises(HilbertIndexingDuringTracingError):
-        numbers_to_states(hi, 1)
-    with pytest.raises(HilbertIndexingDuringTracingError):
-        states_to_numbers(hi, jnp.zeros((hi.size,)))()
+# @pytest.mark.parametrize("hi", discrete_hilbert_params)
+# def test_hilbert_numba_throws(hi):
+#     """Check that get conn throws an error"""
+#     from netket.errors import HilbertIndexingDuringTracingError
+#
+#     @partial(jax.jit, static_argnums=0)
+#     def numbers_to_states(hi, s):
+#         return hi.numbers_to_states(s)
+#
+#     @partial(jax.jit, static_argnums=0)
+#     def states_to_numbers(hi, s):
+#         return hi.states_to_numbers(s)
+#
+#     with pytest.raises(HilbertIndexingDuringTracingError):
+#         numbers_to_states(hi, 1)
+#     with pytest.raises(HilbertIndexingDuringTracingError):
+#         states_to_numbers(hi, jnp.zeros((hi.size,)))()

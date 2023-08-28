@@ -111,8 +111,8 @@ def _colored_graph(graph):
 @pytest.mark.parametrize(
     "partial_hilbert",
     [
-        pytest.param(lambda g: nk.hilbert.Spin(0.5, g.n_nodes), id="spin"),
-        pytest.param(lambda g: nk.hilbert.Qubit(g.n_nodes), id="qubit"),
+        pytest.param(lambda g, dtype: nk.hilbert.Spin(0.5, g.n_nodes, dtype=dtype), id="spin"),
+        pytest.param(lambda g, dtype: nk.hilbert.Qubit(g.n_nodes, dtype=dtype), id="qubit"),
     ],
 )
 @pytest.mark.parametrize(
@@ -125,14 +125,14 @@ def _colored_graph(graph):
     ],
 )
 def test_jax_conn(graph, partial_hilbert, partial_H_pair, dtype):
-    hilbert = partial_hilbert(graph)
+    hilbert = partial_hilbert(graph, dtype)
     H1 = partial_H_pair[0](hilbert, graph)
     H2 = partial_H_pair[1](hilbert, graph)
 
     if isinstance(hilbert, nk.hilbert.Qubit) and isinstance(H1, nk.operator.Ising):
         pytest.skip("The original Ising only supports Spin")
 
-    σ = hilbert.random_state(nk.jax.PRNGKey(0), size=(10,), dtype=dtype)
+    σ = hilbert.random_state(nk.jax.PRNGKey(0), size=(10,))
     σp1, mels1 = H1.get_conn_padded(σ)
     σp2, mels2 = H2.get_conn_padded(σ)
     n_conn1 = H1.n_conn(σ)

@@ -262,8 +262,8 @@ def test_get_conn_numpy_closure(op):
 )
 def test_get_conn_padded(op, shape, dtype):
     hi = op.hilbert
-
-    v = hi.random_state(jax.random.PRNGKey(0), shape, dtype=dtype)
+    hi.dtype = dtype
+    v = hi.random_state(jax.random.PRNGKey(0), shape)
 
     vp, mels = op.get_conn_padded(v)
 
