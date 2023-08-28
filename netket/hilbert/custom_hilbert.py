@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from typing import Optional, List, Callable
+from netket.utils.types import DType
 
 from numbers import Real
 
@@ -29,6 +30,7 @@ class CustomHilbert(HomogeneousHilbert):
         local_states: Optional[List[Real]],
         N: int = 1,
         constraint_fn: Optional[Callable] = None,
+        dtype: Optional[DType] = None,
     ):
         r"""
         Constructs a new ``CustomHilbert`` given a list of eigenvalues of the states and
@@ -51,7 +53,7 @@ class CustomHilbert(HomogeneousHilbert):
            >>> print(hi.size)
            100
         """
-        super().__init__(local_states, N, constraint_fn)
+        super().__init__(local_states, N, constraint_fn, dtype=dtype)
 
     def states_to_local_indices(self, x):
         local_states = jnp.asarray(self.local_states)

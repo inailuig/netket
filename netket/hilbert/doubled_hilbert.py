@@ -27,7 +27,7 @@ class DoubledHilbert(DiscreteHilbert):
     :math:`\hat{H}\otimes \hat{H}`, encoded according to Choi's isomorphism.
     """
 
-    def __init__(self, hilb: AbstractHilbert):
+    def __init__(self, hilb: AbstractHilbert, dtype=None):
         r"""
         Superoperatorial hilbert space for states living in the tensorised
         state :math:`\hat{H}\otimes \hat{H}`, encoded according to Choi's
@@ -49,7 +49,11 @@ class DoubledHilbert(DiscreteHilbert):
         self.physical = hilb
         self._size = 2 * hilb.size
 
-        super().__init__(shape=hilb.shape * 2)
+        if dtype is None:
+            # TODO !!! check it would not overflow
+            dtype = hilb.dtype
+
+        super().__init__(shape=hilb.shape * 2, dtype=dtype)
 
     @property
     def size(self):

@@ -17,6 +17,7 @@ from typing import Optional, List, Union, Iterable, Tuple
 from abc import ABC
 
 import numpy as np
+import jax.numpy as jnp
 
 from .abstract_hilbert import AbstractHilbert
 
@@ -166,14 +167,17 @@ class TensorHilbert(ABC):
 
 
 class TensorGenericHilbert(TensorHilbert, AbstractHilbert):
-    def __init__(self, *hilb_spaces: AbstractHilbert):
+    def __init__(self, *hilb_spaces: AbstractHilbert, dtype=None):
         if not all(isinstance(hi, AbstractHilbert) for hi in hilb_spaces):
             raise TypeError(
                 "Arguments to TensorHilbert must all be subtypes of "
                 "AbstractHilbert. However the types are:\n\n"
                 f"{list(type(hi) for hi in hilb_spaces)}\n"
             )
-        super().__init__(hilb_spaces)
+        if dtype is None:
+            # TODO !!! check it would not overflow
+            dtype = jnp.result_type(*(hi.dtype for hi in hilb_spaces))
+        super().__init__(hilb_spaces, dtype=dtype)
 
     def __mul__(self, other):
         spaces_l = self._hilbert_spaces[:-1]

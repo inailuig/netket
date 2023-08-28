@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from typing import Optional, List, Callable
-
+from netket.utils.types import Array, DType
 from numbers import Real
 
 import numpy as np
@@ -50,6 +50,7 @@ class HomogeneousHilbert(DiscreteHilbert):
         local_states: Optional[List[Real]],
         N: int = 1,
         constraint_fn: Optional[Callable] = None,
+        dtype : Optional[DType] = None
     ):
         r"""
         Constructs a new ``HomogeneousHilbert`` given a list of eigenvalues of the
@@ -85,7 +86,7 @@ class HomogeneousHilbert(DiscreteHilbert):
         self.__hilbert_index = None
 
         shape = tuple(self._local_size for _ in range(N))
-        super().__init__(shape=shape)
+        super().__init__(shape=shape, dtype=dtype)
 
     @property
     def size(self) -> int:

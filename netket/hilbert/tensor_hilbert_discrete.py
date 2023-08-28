@@ -44,7 +44,7 @@ class TensorDiscreteHilbert(TensorHilbert, DiscreteHilbert):
 
     """
 
-    def __init__(self, *hilb_spaces: DiscreteHilbert):
+    def __init__(self, *hilb_spaces: DiscreteHilbert, dtype=None):
         r"""Constructs a tensor Hilbert space
 
         Args:
@@ -59,7 +59,11 @@ class TensorDiscreteHilbert(TensorHilbert, DiscreteHilbert):
 
         shape = np.concatenate([hi.shape for hi in hilb_spaces])
 
-        super().__init__(hilb_spaces, shape=shape)
+        if dtype is None:
+            # TODO !!! check it would not overflow
+            dtype = jnp.result_type(*(hi.dtype for hi in hilb_spaces))
+
+        super().__init__(hilb_spaces, shape=shape, dtype=dtype)
 
         # pre-compute indexing data iff the tensor space is still indexable
         if all(hi.is_indexable for hi in hilb_spaces) and _is_indexable(shape):
@@ -101,12 +105,11 @@ class TensorDiscreteHilbert(TensorHilbert, DiscreteHilbert):
         # etc...
 
         rem = numbers
+        out = jnp.zeros((numbers.shape[0], self.size), dtype=self.dtype)
         for (i, dim) in enumerate(self._ns_states_r):
             rem, loc_numbers = np.divmod(rem, dim)
             hi_i = self._n_hilbert_spaces - (i + 1)
-            self._hilbert_spaces[hi_i].numbers_to_states(
-                loc_numbers, out=out[:, self._cum_indices[hi_i] : self._cum_sizes[hi_i]]
-            )
+            out = out.at[:, self._cum_indices[hi_i] : self._cum_sizes[hi_i]].set(self._hilbert_spaces[hi_i].numbers_to_states(loc_numbers))
 
         return out
 
@@ -121,6 +124,7 @@ class TensorDiscreteHilbert(TensorHilbert, DiscreteHilbert):
         return out
 
     def states_to_local_indices(self, x):
+        # TODO set dtype
         out = jnp.empty_like(x, dtype=jnp.int32)
         for (i, hilb_i) in enumerate(self._hilbert_spaces):
             out = out.at[..., self._cum_indices[i] : self._cum_sizes[i]].set(
