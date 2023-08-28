@@ -104,23 +104,6 @@ class ExactSampler(Sampler):
             p=state.pdf,
         )
 
-        # We use a host-callback to convert integers labelling states to
-        # valid state-arrays because that code is written with numba and
-        # we have not yet converted it to jax.
-        #
-        # For future investigators:
-        # this will lead to a crash if numbers_to_state throws.
-        # it throws if we feed it nans!
-        samples = jax.pure_callback(
-            lambda numbers: sampler.hilbert.numbers_to_states(numbers),
-            jax.ShapeDtypeStruct(
-                (sampler.n_chains_per_rank * chain_length, sampler.hilbert.size),
-                jnp.float64,
-            ),
-            numbers,
-        )
-        samples = jnp.asarray(samples, dtype=sampler.dtype).reshape(
-            sampler.n_chains_per_rank, chain_length, sampler.hilbert.size
-        )
-
+        samples = sampler.hilbert.numbers_to_states(numbers)
+        samples = samples.reshape(sampler.n_chains_per_rank, chain_length, sampler.hilbert.size)
         return samples, state.replace(rng=new_rng)
