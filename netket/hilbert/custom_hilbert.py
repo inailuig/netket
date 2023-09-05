@@ -56,7 +56,7 @@ class CustomHilbert(HomogeneousHilbert):
         super().__init__(local_states, N, constraint_fn, dtype=dtype)
 
     def states_to_local_indices(self, x):
-        local_states = jnp.asarray(self.local_states)
+        local_states = jnp.asarray(self.local_states, dtype=self.dtype)
         local_states = local_states.reshape(tuple(1 for _ in range(x.ndim)) + (-1,))
         x = x.reshape(x.shape + (1,))
         x_idmap = x == local_states

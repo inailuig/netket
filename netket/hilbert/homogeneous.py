@@ -16,7 +16,10 @@ from typing import Optional, List, Callable
 from netket.utils.types import Array, DType
 from numbers import Real
 
+from netket.utils import HashableArray
+
 import numpy as np
+import jax.numpy as jnp
 
 from .discrete_hilbert import DiscreteHilbert
 from .index import HilbertIndex, UnconstrainedHilbertIndex, ConstrainedHilbertIndex
@@ -71,6 +74,7 @@ class HomogeneousHilbert(DiscreteHilbert):
         self._is_finite = local_states is not None
 
         if self._is_finite:
+            # TODO eventually turn this in to dataclass and use jax array
             self._local_states = np.asarray(local_states)
             assert self._local_states.ndim == 1
             self._local_size = self._local_states.shape[0]
@@ -84,6 +88,13 @@ class HomogeneousHilbert(DiscreteHilbert):
         self._constraint_fn = constraint_fn
 
         self.__hilbert_index = None
+
+        if dtype is None:
+            # TODO better ideas?
+            if self._local_states is not None:
+                dtype = np.asarray(local_states).dtype
+            else:
+                dtype = jax.dtypes.canonicalize_dtype(np.uint64)
 
         shape = tuple(self._local_size for _ in range(N))
         super().__init__(shape=shape, dtype=dtype)
@@ -105,7 +116,7 @@ class HomogeneousHilbert(DiscreteHilbert):
     def local_states(self) -> Optional[List[float]]:
         r"""A list of discrete local quantum numbers.
         If the local states are infinitely many, None is returned."""
-        return self._local_states
+        return jnp.asarray(self._local_states, dtype=self.dtype)
 
     def states_at_index(self, i: int):
         return self.local_states
@@ -155,13 +166,13 @@ class HomogeneousHilbert(DiscreteHilbert):
 
             if self.constrained:
                 self.__hilbert_index = ConstrainedHilbertIndex(
-                    np.asarray(self.local_states),
+                    self.local_states,
                     self.size,
                     self._constraint_fn,
                 )
             else:
                 self.__hilbert_index = UnconstrainedHilbertIndex(
-                    np.asarray(self.local_states), self.size
+                    self.local_states, self.size
                 )
 
         return self.__hilbert_index
@@ -172,6 +183,7 @@ class HomogeneousHilbert(DiscreteHilbert):
         clsname = type(self).__name__
         return f"{clsname}(local_size={self._local_size}, N={self.size}{constr})"
 
+    # used to compute the hash for jax jit
     @property
     def _attrs(self):
         return (
@@ -180,4 +192,5 @@ class HomogeneousHilbert(DiscreteHilbert):
             self._local_states_frozen,
             self.constrained,
             self._constraint_fn,
+            self.dtype
         )

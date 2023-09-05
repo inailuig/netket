@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import numpy as np
+import jax.numpy as jnp
 
 from netket.utils.dispatch import parametric
 

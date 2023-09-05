@@ -58,8 +58,11 @@ class ContinuousHilbert(AbstractHilbert):
             )
 
         if dtype is None:
-            domain_without_inf = [np.asarray(d) for d in jax.tree_leaves(domain) if d != np.inf]
-            dtype = jax.dtypes.result_type(*domain_without_inf)
+            # doesn't work if the user specifies ints for the domain
+            # domain_without_inf = [np.asarray(d) for d in jax.tree_leaves(domain) if d != np.inf]
+            # dtype = jax.dtypes.result_type(*domain_without_inf)
+            # just default to float for now
+            dtype = jax.dtypes.canonicalize_dtype(float)
         # TODO: cast extent to dtype?
 
         super().__init__(dtype)

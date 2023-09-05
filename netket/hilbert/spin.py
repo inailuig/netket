@@ -18,7 +18,8 @@ from netket.utils.types import DType
 from functools import partial
 
 import numpy as np
-from numba import jit
+
+import jax.numpy as jnp
 
 from .homogeneous import HomogeneousHilbert
 
@@ -89,7 +90,7 @@ class Spin(HomogeneousHilbert):
 
         for i in range(local_size):
             local_states[i] = -round(2 * s) + 2 * i
-        local_states = local_states.tolist()
+        local_states = jnp.asarray(local_states, dtype=dtype)
 
         _check_total_sz(total_sz, s, N)
         if total_sz is not None:
