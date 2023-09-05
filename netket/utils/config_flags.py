@@ -15,6 +15,8 @@
 from typing import Union
 
 import os
+import sys
+import warnings
 from textwrap import dedent
 
 
@@ -277,6 +279,14 @@ config.define(
     runtime=True,
 )
 
+
+def _setup_experimental_pjit(val):
+    if val:
+        import jax
+
+        jax.config.update("jax_threefry_partitionable", True)
+
+
 config.define(
     "NETKET_EXPERIMENTAL_PJIT",
     bool,
@@ -294,4 +304,31 @@ config.define(
         """
     ),
     runtime=False,
+    callback=_setup_experimental_pjit,
+)
+
+
+def _setup_xla_pmap(n_procs):
+    if n_procs > 1:
+        if "jax" in sys.modules:
+            warnings.warn("must load NetKet before jax if using experimental_pjit_cpu")
+
+        flags = os.environ.get("XLA_FLAGS", "")
+        flags = f"{flags} --xla_force_host_platform_device_count={n_procs}"
+        os.environ["XLA_FLAGS"] = flags
+
+
+config.define(
+    "NETKET_EXPERIMENTAL_PJIT_CPU",
+    int,
+    default=0,
+    help=dedent(
+        """
+        Set to >=1 to force JAX to use multiple threads as separate devices on cpu.
+        Sets the XLA_FLAGS='--xla_force_host_platform_device_count=#' environment variable.
+        Disabled by default.
+        """
+    ),
+    runtime=False,
+    callback=_setup_xla_pmap,
 )
