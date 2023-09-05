@@ -29,7 +29,7 @@ def random_state(hilb: CustomHilbert, key, batches: int):
 
     σ = jax.random.choice(
         key,
-        jnp.asarray(hilb.local_states, dtype=hilb.dtype),
+        hilb.local_states,
         shape=(batches, hilb.size),
         replace=True,
     )
@@ -38,10 +38,8 @@ def random_state(hilb: CustomHilbert, key, batches: int):
 
 @dispatch
 def flip_state_scalar(hilb: CustomHilbert, key, σ, indx):
-    local_states = jnp.asarray(hilb.local_states, dtype=hilb.dtype)
-
+    local_states = hilb.local_states
     rs = jax.random.randint(key, shape=(), minval=0, maxval=len(local_states) - 1)
-
     new_val = local_states[rs + (local_states[rs] >= σ[indx])]
     return σ.at[indx].set(new_val), σ[indx]
 
@@ -49,9 +47,7 @@ def flip_state_scalar(hilb: CustomHilbert, key, σ, indx):
 @dispatch
 def flip_state_batch(hilb: CustomHilbert, key, σ, indxs):
     n_batches = σ.shape[0]
-
-    local_states = jnp.asarray(hilb.local_states, dtype=hilb.dtype)
-
+    local_states = hilb.local_states
     rs = jax.random.randint(
         key, shape=(n_batches,), minval=0, maxval=len(local_states) - 1
     )
