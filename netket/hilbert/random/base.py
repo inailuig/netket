@@ -49,12 +49,14 @@ def random_state(hilb, key, *, size=None):
 
 
 @dispatch
-def random_state(hilb, key, size):  # noqa: F811
-    return random_state(hilb, key, size=size)
-
-@dispatch
 def random_state(hilb, key, size: None):  # noqa: F811
     return random_state(hilb, key, 1)[0]
+
+
+@dispatch
+def random_state(hilb, key, size: Dim):  # noqa: F811
+    n = int(np.prod(size))
+    return random_state(hilb, key, n).reshape(*size, -1)
 
 @dispatch
 def random_state(hilb, key, size: int):  # noqa: F811
