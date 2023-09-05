@@ -122,8 +122,9 @@ class DiscreteHilbert(AbstractHilbert):
                 quantum numbers.
         """
 
-        if np.any(numbers >= self.n_states):
-            raise ValueError("numbers outside the range of allowed states")
+        # cannot check under jit
+        # if np.any(numbers >= self.n_states):
+        #     raise ValueError("numbers outside the range of allowed states")
 
         if is_scalar(numbers):
             return self._numbers_to_states(jnp.atleast_1d(numbers))[0, :]
