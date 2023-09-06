@@ -1,8 +1,9 @@
-import jax
-
-from jax.tree_util import Partial
-
 from functools import partial, wraps
+
+import jax
+from jax.tree_util import Partial
+from jax.experimental.shard_map import shard_map
+from jax.sharding import Mesh, PartitionSpec as P
 
 from netket.jax import (
     compose,
@@ -10,17 +11,11 @@ from netket.jax import (
     scan_append_reduce,
     vjp as nkvjp,
 )
-
-
-from ._scanmap import _multimap
-
-from ._chunk_utils import _chunk as _tree_chunk, _unchunk as _tree_unchunk
-
 from netket.utils import HashablePartial
 from netket.utils import config
 
-from jax.experimental.shard_map import shard_map
-from jax.sharding import Mesh, PartitionSpec as P
+from ._scanmap import _multimap
+from ._chunk_utils import _chunk as _tree_chunk, _unchunk as _tree_unchunk
 
 
 def _trash_tuple_elements(t, nums=()):
