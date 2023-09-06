@@ -319,11 +319,9 @@ class FullSumState(VariationalState):
     @property
     def _all_states(self):
         if self._states is None:
+            self._states = self.hilbert.all_states()
             if config.netket_experimental_pjit:
-                x = self.hilbert.all_states()
-                self._states, self._mask = put_global(x, pad=True, pad_value=x[0])
-            else:
-                self._states = self.hilbert.all_states()
+                self._states, self._mask = put_global(self._states, pad=True, pad_value=x[0])
         return self._states
 
     def __repr__(self):
