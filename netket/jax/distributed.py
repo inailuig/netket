@@ -34,7 +34,7 @@ def _replicate_shmap_callback(f, x):
 
 # TODO eventually make this a bit more univesal
 # supporting more fancy sharding and multiple input/output args
-def replicate_sharding_shmap(f):
+def replicate_sharding(f):
     """
     Wrapper for python get_conn_padded to make it work with shared/global device arrays.
     Calls f on every shard, and puts the results back on the devices with the correct sharding.
@@ -46,9 +46,6 @@ def replicate_sharding_shmap(f):
         f: a python get_conn_padded (which takes x and maps it to (xp,mels))
     """
     return partial(_replicate_shmap_callback, f)
-
-
-replicate_sharding = replicate_sharding_shmap
 
 
 _identity = lambda x: x
