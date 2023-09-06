@@ -1,12 +1,13 @@
-import jax
-import jax.numpy as jnp
+import math
 from functools import partial
 import numpy as np
 
-import math
-
+import jax
+import jax.numpy as jnp
 from jax.sharding import Mesh, PartitionSpec as P
 from jax.experimental.shard_map import shard_map
+
+from netket.utils import config
 
 
 @partial(jax.jit, static_argnums=0)
@@ -114,3 +115,45 @@ def extract_replicated(t):
 
 def gather(x):
     return jax.jit(_identity, out_shardings=x.sharding.replicate())(x)
+
+
+def sharding_decorator(f, sharded_argnums, reduction_op=None):
+    # sharded_args: list of indices indicating that the input is sharded on axis 0, (assumed to be replicated otherwise)
+    # reduction_op: list of true/false indicating if output should be reduced (assumed to be sharded otherwise)
+    # only supports 1 output for now
+
+    if config.netket_experimental_pjit:
+        def _fun(*args):
+            n_args = len(args)
+
+            # workaround for shard_map not supporting non-array args part 1/2
+            nonarray_argnums = tuple(i for i, a in enumerate(args) if not hasattr(a, 'dtype') )
+            for i in nonarray_argnums: assert i not in sharded_argnums
+            nonarray_args = tuple(a for i,a in enumerate(args) if i in nonarray_argnums)
+            args = tuple(a for i,a in enumerate(args) if i not in nonarray_argnums)
+
+            mesh = Mesh(jax.devices(), axis_names=("i"))
+            in_specs = tuple(P("i") if i in sharded_argnums else P() for i in range(n_args))
+            in_specs = tuple(s for i, s in enumerate(in_specs) if i not in nonarray_argnums)
+            out_specs = P("i") if reduction_op is None else P()
+
+            _reduction = None
+            if reduction_op is not None:
+                _reduction = partial(jax.tree_map, partial(reduction_op, axis_name="i"))
+
+            @partial(shard_map, mesh=mesh, in_specs=in_specs, out_specs=out_specs)
+            def _f(*args):
+
+                # workaround for shard_map not supporting non-array args part 2/2
+                it = iter(args)
+                it_nonarray = iter(nonarray_args)
+                args = tuple(next(it_nonarray) if i in nonarray_argnums else next(it) for i in range(n_args))
+
+                res = f(*args)
+                if _reduction is not None:
+                    res = _reduction(res)
+                return res
+            return _f(*args)
+        return _fun
+
+    return f

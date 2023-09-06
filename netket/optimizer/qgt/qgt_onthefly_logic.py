@@ -24,11 +24,7 @@ from netket.jax import (
     scan_append,
     chunk,
 )
-
-# from netket.utils import config
-
-from jax.experimental.shard_map import shard_map
-from jax.sharding import Mesh, PartitionSpec as P
+from netket.jax.distributed import sharding_decorator
 
 # Stochastic Reconfiguration with jvp and vjp
 
@@ -97,51 +93,33 @@ def mat_vec_factory(forward_fn, params, model_state, samples, pdf=None):
 # Methods below are needed for the chunked version of QGTOnTheFly
 
 
-@partial(scanmap, scan_fun=scan_append, argnums=2)
-def __O_jvp(forward_fn, params, samples, v):
-    # TODO apply the transpose of sum_inplace (allreduce) to the arg v here
-    # in order to get correct transposition with MPI
-    _, res = jax.jvp(lambda p: forward_fn(p, samples), (params,), (v,))
-    return res
-
-
-@partial(scanmap, scan_fun=scan_reduce, argnums=(2, 3))
-def __O_vjp(forward_fn, params, samples, w):
-    _, vjp_fun = jax.vjp(forward_fn, params, samples)
-    res, _ = vjp_fun(w)
-    return res
-
-
-# TODO shard_map only if config.netket_experimental_pjit
-
-
+@partial(sharding_decorator, sharded_argnums=(2,))
 def _O_jvp(forward_fn, params, samples, v, chunk_size):
-    mesh = Mesh(jax.devices(), axis_names=("i"))
-    in_specs = P(), P("i"), P()
-    out_specs = P("i")
 
-    @partial(shard_map, mesh=mesh, in_specs=in_specs, out_specs=out_specs)
-    def _jvp(params, samples, v):
-        samples, ucf = chunk(samples, chunk_size)
-        res = __O_jvp(forward_fn, params, samples, v)
-        return ucf(res)
+    @partial(scanmap, scan_fun=scan_append, argnums=2)
+    def __O_jvp(forward_fn, params, samples, v):
+        # TODO apply the transpose of sum_inplace (allreduce) to the arg v here
+        # in order to get correct transposition with MPI
+        _, res = jax.jvp(lambda p: forward_fn(p, samples), (params,), (v,))
+        return res
 
-    return _jvp(params, samples, v)
+    samples, unchunk_fn = chunk(samples, chunk_size)
+    res = __O_jvp(forward_fn, params, samples, v)
+    return unchunk_fn(res)
 
-
+@partial(sharding_decorator, sharded_argnums=(2, 3), reduction_op=jax.lax.psum)
 def _O_vjp(forward_fn, params, samples, w, chunk_size):
-    mesh = Mesh(jax.devices(), axis_names=("i"))
-    in_specs = P(), P("i"), P("i")
-    out_specs = P()
 
-    @partial(shard_map, mesh=mesh, in_specs=in_specs, out_specs=out_specs)
-    def _vjp(params, samples, w):
-        samples, _ = chunk(samples, chunk_size)
-        w, _ = chunk(w, chunk_size)
-        res = __O_vjp(forward_fn, params, samples, w)
-        return jax.tree_map(partial(jax.lax.psum, axis_name="i"), res)
+    @partial(scanmap, scan_fun=scan_reduce, argnums=(2, 3))
+    def __O_vjp(forward_fn, params, samples, w):
+        _, vjp_fun = jax.vjp(forward_fn, params, samples)
+        res, _ = vjp_fun(w)
+        return res
 
-    return _vjp(params, samples, w)
+    samples, _ = chunk(samples, chunk_size)
+    w, _ = chunk(w, chunk_size)
+    res = __O_vjp(forward_fn, params, samples, w)
+    return res
 
 
 def _OH_w(forward_fn, params, samples, w, chunk_size):
