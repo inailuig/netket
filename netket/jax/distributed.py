@@ -119,7 +119,7 @@ def gather(x):
 
 def sharding_decorator(f, sharded_argnums, reduction_op=None):
     # sharded_args: list of indices indicating that the input is sharded on axis 0, (assumed to be replicated otherwise)
-    # reduction_op: list of true/false indicating if output should be reduced (assumed to be sharded otherwise)
+    # reduction_op: function to reduce the output (assumed to be sharded otherwise), e.g. jax.lax.psum
     # only supports 1 output for now
 
     if config.netket_experimental_pjit:
