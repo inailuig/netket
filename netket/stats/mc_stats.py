@@ -109,6 +109,7 @@ class Stats:
         return "Mean", self.to_dict()
 
     def __repr__(self):
+        # extract adressable data from fully replicated arrays
         self = extract_replicated(self)
         mean, err, var = _format_decimal(self.mean, self.error_of_mean, self.variance)
         if not math.isnan(self.R_hat):
