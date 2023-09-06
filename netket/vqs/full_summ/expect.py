@@ -15,8 +15,6 @@
 from functools import partial, lru_cache
 from typing import Callable
 
-import operator
-
 import jax
 from jax import numpy as jnp
 from flax.core.scope import CollectionFilter, DenyList  # noqa: F401
@@ -71,7 +69,7 @@ def expect(vstate: FullSumState, Ô: DiscreteOperator) -> Stats:  # noqa: F811
         # TODO store blocks of rows on each device
         # once jax supports shared sparse arrays
         O = sparsify(Ô, _pad_size=Ψ.shape[0])
-        OΨ = jax.jit(operator.matmul, O, Ψ)
+        OΨ = jax.jit(lambda x,y: x@y, O, Ψ)
     else:
         O = sparsify(Ô)
         # might be scipy sparse array, so cannot jit
@@ -100,7 +98,7 @@ def expect_and_forces(
         # TODO store blocks of rows on each device
         # once jax supports shared sparse arrays
         O = sparsify(Ô, _pad_size=Ψ.shape[0])
-        OΨ = jax.jit(operator.matmul, O, Ψ)
+        OΨ = jax.jit(lambda x,y: x@y, O, Ψ)
     else:
         O = sparsify(Ô)
         # might be scipy sparse array, so cannot jit
