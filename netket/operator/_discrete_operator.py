@@ -22,6 +22,7 @@ from netket.hilbert import DiscreteHilbert
 from netket.operator import AbstractOperator
 from jax.experimental.sparse import BCOO
 from netket.utils import config
+from netket.jax.distributed import replicate_sharding
 
 
 class DiscreteOperator(AbstractOperator):
@@ -43,6 +44,7 @@ class DiscreteOperator(AbstractOperator):
         """The maximum number of non zero ⟨x|O|x'⟩ for every x."""
         raise NotImplementedError
 
+    @replicate_sharding
     def get_conn_padded(self, x: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         r"""Finds the connected elements of the Operator.
 
