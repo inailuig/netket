@@ -65,9 +65,10 @@ def replicate_sharding(f):
             mels_dev = []
             for (xp, mels), s in zip(xp_mels_np, x.addressable_shards):
                 npad = n_conn_max - mels.shape[-1]
-                mels = np.pad(mels, pad_width=((0,0),)*(mels.ndim-1)+((0, npad),))
-                xp = np.pad(xp, pad_width=((0,0),)*(mels.ndim-1)+((0, npad),)+((0,0),))
-                xp[..., -npad:, :] = xp[0]
+                if npad > 0:
+                    mels = np.pad(mels, pad_width=((0,0),)*(mels.ndim-1)+((0, npad),))
+                    xp = np.pad(xp, pad_width=((0,0),)*(mels.ndim-1)+((0, npad),)+((0,0),))
+                    xp[..., -npad:, :] = xp[..., :1, :]
                 xp_dev.append(jax.device_put(xp, s.device))
                 mels_dev.append(jax.device_put(mels, s.device))
             shape = x.shape[:-1]+(n_conn_max,)
