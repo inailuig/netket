@@ -93,7 +93,7 @@ def mat_vec_factory(forward_fn, params, model_state, samples, pdf=None):
 # Methods below are needed for the chunked version of QGTOnTheFly
 
 
-@partial(sharding_decorator, sharded_argnums=(2,))
+@partial(sharding_decorator, sharded_args_tree=(False, False, True, False, False))
 def _O_jvp(forward_fn, params, samples, v, chunk_size):
 
     @partial(scanmap, scan_fun=scan_append, argnums=2)
@@ -107,7 +107,7 @@ def _O_jvp(forward_fn, params, samples, v, chunk_size):
     res = __O_jvp(forward_fn, params, samples, v)
     return unchunk_fn(res)
 
-@partial(sharding_decorator, sharded_argnums=(2, 3), reduction_op=jax.lax.psum)
+@partial(sharding_decorator, sharded_args_tree=(False, False, True, True, False), reduction_op_tree=jax.lax.psum)
 def _O_vjp(forward_fn, params, samples, w, chunk_size):
 
     @partial(scanmap, scan_fun=scan_reduce, argnums=(2, 3))

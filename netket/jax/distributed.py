@@ -41,8 +41,6 @@ def replicate_sharding(f):
     Calls f on every shard, and puts the results back on the devices with the correct sharding.
     The input to f is assumed to have PositionalSharding (or equivalent) along a single batch axis.
 
-    version which uses pure_callback and jax.experimental.shard_map internally
-
     Args:
         f: a python get_conn_padded (which takes self, x and maps it to (xp,mels))
     """
@@ -148,42 +146,58 @@ def gather(x):
     return jax.jit(_identity, out_shardings=x.sharding.replicate())(x)
 
 
-def sharding_decorator(f, sharded_argnums, reduction_op=None):
-    # sharded_args: list of indices indicating that the input is sharded on axis 0, (assumed to be replicated otherwise)
-    # reduction_op: function to reduce the output (assumed to be sharded otherwise), e.g. jax.lax.psum
-    # only supports 1 output for now
+def sharding_decorator(f, sharded_args_tree, reduction_op_tree=False):
+    # sharded_args_tree: a tuple/pyrtree of True/False indicating that the input is sharded on axis 0, (assumed to be replicated otherwise)
+    #                    the args are flattened according to sharded_args_tree, so if an arg is a pytree it is assumed for all of it
+    # reduction_op_tree: a tuple/pyrtree of reduction_op/False indicating that the input is sharded on axis 0, (assumed to be sharded otherwise), e.g. jax.lax.psum
 
     if config.netket_experimental_pjit:
+
+        sharded_args, args_treedef = jax.tree_util.tree_flatten(sharded_args_tree)
+        reduction_op, out_treedef = jax.tree_util.tree_flatten(reduction_op_tree)
+
         @wraps(f)
         def _fun(*args):
+
+            args = args_treedef.flatten_up_to(args)
             n_args = len(args)
 
-            # workaround for shard_map not supporting non-array args part 1/2
-            nonarray_argnums = tuple(i for i, a in enumerate(args) if not hasattr(a, 'dtype') )
-            for i in nonarray_argnums: assert i not in sharded_argnums
-            nonarray_args = tuple(a for i,a in enumerate(args) if i in nonarray_argnums)
-            args = tuple(a for i,a in enumerate(args) if i not in nonarray_argnums)
+            _sele = lambda cond, xs: tuple(x for c,x in zip(cond, xs) if c)
+            _not = lambda t: tuple(not x for x in t)
+            _sele2 = lambda cond, x, y: tuple(x if c else y for c in cond)
+
+            # workaround for shard_map not supporting non-array args part 1/3
+            nonarray_args = tuple(not hasattr(a, 'dtype') for a in args)
+            nonarray_argnums = tuple(i for i, c in enumerate(nonarray_args) if c)
+            for c1, c2 in zip(nonarray_args, sharded_args): assert not (c1 and c2)
+            args_nonarray = _sele(nonarray_args, args)
+            args = _sele(_not(nonarray_args), args)
 
             mesh = Mesh(jax.devices(), axis_names=("i"))
-            in_specs = tuple(P("i") if i in sharded_argnums else P() for i in range(n_args))
-            in_specs = tuple(s for i, s in enumerate(in_specs) if i not in nonarray_argnums)
-            out_specs = P("i") if reduction_op is None else P()
+            in_specs = _sele2(sharded_args, P("i"), P())
+            out_specs = out_treedef.unflatten(_sele2(reduction_op, P(), P("i")))
 
-            _reduction = None
-            if reduction_op is not None:
-                _reduction = partial(jax.tree_map, partial(reduction_op, axis_name="i"))
+            # workaround for shard_map not supporting non-array args part 2/3
+            in_specs = tuple(s for i, s in enumerate(in_specs) if i not in nonarray_argnums)
+
 
             @partial(shard_map, mesh=mesh, in_specs=in_specs, out_specs=out_specs)
             def _f(*args):
 
-                # workaround for shard_map not supporting non-array args part 2/2
+                # workaround for shard_map not supporting non-array args part 3/3
                 it = iter(args)
-                it_nonarray = iter(nonarray_args)
+                it_nonarray = iter(args_nonarray)
                 args = tuple(next(it_nonarray) if i in nonarray_argnums else next(it) for i in range(n_args))
 
-                res = f(*args)
-                if _reduction is not None:
-                    res = _reduction(res)
+                res = f(*args_treedef.unflatten(args))
+
+                # apply reductions
+                # using lambda inside list generator does not seem to work as intended, so we define it outside
+                _id = lambda x: x
+                reductions = [_id if o is False else partial(jax.tree_map, partial(o, axis_name="i")) for o in reduction_op]
+                res = out_treedef.flatten_up_to(res)
+                res = [f(r) for f, r in zip(reductions, res)]
+                res = out_treedef.unflatten(res)
                 return res
             return _f(*args)
         return _fun
