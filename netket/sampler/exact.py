@@ -97,9 +97,11 @@ class ExactSampler(Sampler):
         # go, since it's not really a chain anyway. This will be much faster because
         # we call into python only once.
         new_rng, rng = jax.random.split(state.rng)
+        with jax.ensure_compile_time_eval():
+            alst = sampler.hilbert.all_states()
         samples = jax.random.choice(
             rng,
-            sampler.hilbert.all_states(),
+            alst,
             shape=(chain_length * sampler.n_chains_per_rank,),
             replace=True,
             p=state.pdf,
