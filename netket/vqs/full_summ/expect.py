@@ -24,6 +24,7 @@ from netket.operator import Squared
 from netket.stats import Stats
 from netket.utils.types import PyTree
 from netket.utils.dispatch import dispatch
+from netket.utils import config
 
 from netket.operator import DiscreteOperator
 
@@ -41,27 +42,41 @@ def _check_hilbert(A, B):
 # TODO: This cache is here so that we don't re-compute the sparse representation of the operators at every VMC step
 # but instead we cache the last 5 used. Should investigate a better way to implement this caching.
 @lru_cache(5)
-def sparsify(Ô):
+def sparsify(Ô, **kwargs):
     """
     Converts to sparse but also cache the sparsificated result to speed up.
     """
-    return Ô.to_sparse()
+    return Ô.to_sparse(**kwargs)
+
+
+@jax.jit
+def _exp(Ψ, OΨ):
+    expval_O = (Ψ.conj() * OΨ).sum()
+    variance = jnp.sum(jnp.abs(OΨ - expval_O * Ψ) ** 2)
+    return expval_O, variance
 
 
 @dispatch
 def expect(vstate: FullSumState, Ô: DiscreteOperator) -> Stats:  # noqa: F811
     _check_hilbert(vstate, Ô)
 
-    O = sparsify(Ô)
     Ψ = vstate.to_array()
 
     # TODO: This performs the full computation on all MPI ranks.
     # It would be great if we could split the computation among ranks.
 
-    OΨ = O @ Ψ
-    expval_O = (Ψ.conj() * OΨ).sum()
+    if config.netket_experimental_sharding:
+        # TODO store blocks of rows on each device
+        # once jax supports shared sparse arrays
+        O = sparsify(Ô, _pad_size=Ψ.shape[0])
+        OΨ = jax.jit(lambda x, y: x @ y, O, Ψ)
+    else:
+        O = sparsify(Ô)
+        # might be scipy sparse array, so cannot jit
+        OΨ = O @ Ψ
 
-    variance = jnp.sum(jnp.abs(OΨ - expval_O * Ψ) ** 2)
+    expval_O, variance = _exp(Ψ, OΨ)
+
     return Stats(mean=expval_O, error_of_mean=0.0, variance=variance)
 
 
@@ -77,9 +92,17 @@ def expect_and_forces(
 
     _check_hilbert(vstate, Ô)
 
-    O = sparsify(Ô)
     Ψ = vstate.to_array()
-    OΨ = O @ Ψ
+
+    if config.netket_experimental_sharding:
+        # TODO store blocks of rows on each device
+        # once jax supports shared sparse arrays
+        O = sparsify(Ô, _pad_size=Ψ.shape[0])
+        OΨ = jax.jit(lambda x, y: x @ y, O, Ψ)
+    else:
+        O = sparsify(Ô)
+        # might be scipy sparse array, so cannot jit
+        OΨ = O @ Ψ
 
     expval_O, Ō_grad, new_model_state = _exp_forces(
         vstate._apply_fun,

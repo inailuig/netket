@@ -21,6 +21,8 @@ from scipy.sparse import csr_matrix as _csr_matrix
 from netket.hilbert import DiscreteHilbert
 from netket.operator import AbstractOperator
 from netket.utils.optional_deps import import_optional_dependency
+from jax.experimental.sparse import BCOO
+from netket.utils import config
 from netket.jax.distributed import replicate_sharding
 
 
@@ -184,7 +186,9 @@ class DiscreteOperator(AbstractOperator):
 
         return out
 
-    def to_sparse(self) -> _csr_matrix:
+    def to_sparse(
+        self, _pad_size=None, _jax=config.netket_experimental_sharding
+    ) -> _csr_matrix:
         r"""Returns the sparse matrix representation of the operator. Note that,
         in general, the size of the matrix is exponential in the number of quantum
         numbers, and this operation should thus only be performed for
@@ -199,28 +203,44 @@ class DiscreteOperator(AbstractOperator):
         hilb = self.hilbert
 
         x = hilb.all_states()
+        n = x.shape[0]
 
-        sections = np.empty(x.shape[0], dtype=np.int32)
+        sections = np.empty(n, dtype=np.int32)
         x_prime, mels = concrete_op.get_conn_flattened(x, sections)
 
         numbers = hilb.states_to_numbers(x_prime)
 
-        sections1 = np.empty(sections.size + 1, dtype=np.int32)
-        sections1[1:] = sections
-        sections1[0] = 0
+        if _pad_size is None:
+            shape = (n, n)
+            sections1 = np.empty(n + 1, dtype=np.int32)
+            sections1[1:] = sections
+            sections1[0] = 0
+        else:
+            assert _pad_size >= n
+            shape = (_pad_size, _pad_size)
+            sections1 = np.empty(_pad_size + 1, dtype=np.int32)
+            sections1[1 : n + 1] = sections
+            sections1[0] = 0
+            sections1[n + 1 :] = sections[-1]
 
         ## eliminate duplicates from numbers
         # rows_indices = compute_row_indices(hilb.states_to_numbers(x), sections1)
 
-        return _csr_matrix(
+        res = _csr_matrix(
             (mels, numbers, sections1),
-            shape=(self.hilbert.n_states, self.hilbert.n_states),
+            shape=shape,
         )
 
-        # return _csr_matrix(
+        # res = _csr_matrix(
         #    (mels, (rows_indices, numbers)),
         #    shape=(self.hilbert.n_states, self.hilbert.n_states),
         # )
+
+        if _jax:
+            # TODO CSR?
+            return BCOO.from_scipy_sparse(res)
+        else:
+            return res
 
     def to_dense(self) -> np.ndarray:
         r"""Returns the dense matrix representation of the operator. Note that,

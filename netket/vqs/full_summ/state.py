@@ -34,6 +34,9 @@ from netket.optimizer.qgt import QGTAuto
 from ..base import VariationalState
 from ..mc.mc_state.state import check_chunk_size, _is_power_of_two
 
+from netket.utils import config
+from netket.jax.distributed import put_global
+
 
 @partial(jax.jit, static_argnums=0)
 def jit_evaluate(fun: Callable, *args):
@@ -45,6 +48,11 @@ def jit_evaluate(fun: Callable, *args):
         args: the arguments to the function.
     """
     return fun(*args)
+
+
+@jax.jit
+def _array_to_pdf(v):
+    return jnp.abs(v) ** 2
 
 
 class FullSumState(VariationalState):
@@ -164,6 +172,7 @@ class FullSumState(VariationalState):
         Caches the output of `self.probability_distribution()`.
         """
 
+        self._mask = None
         self.chunk_size = chunk_size
 
     def init(self, seed=None, dtype=None):
@@ -305,7 +314,7 @@ class FullSumState(VariationalState):
 
     def probability_distribution(self):
         if self._pdf is None:
-            self._pdf = jnp.abs(self.to_array()) ** 2
+            self._pdf = _array_to_pdf(self.to_array())
 
         return self._pdf
 
@@ -314,6 +323,10 @@ class FullSumState(VariationalState):
     def _all_states(self):
         if self._states is None:
             self._states = self.hilbert.all_states()
+            if config.netket_experimental_sharding:
+                self._states, self._mask = put_global(
+                    self._states, pad=True, pad_value=self._states[0]
+                )
         return self._states
 
     def __repr__(self):

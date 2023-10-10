@@ -23,6 +23,9 @@ from netket.nn import to_array
 from netket.utils import struct
 from netket.utils.deprecation import warn_deprecation
 from netket.utils.types import PyTree, SeedT
+from netket.utils import config
+
+from netket.jax.distributed import gather
 
 from .base import Sampler, SamplerState
 
@@ -82,6 +85,9 @@ class ExactSampler(Sampler):
             to_array(sampler.hilbert, machine.apply, parameters) ** sampler.machine_pow
         )
         pdf = pdf / pdf.sum()
+
+        if config.netket_experimental_sharding:
+            pdf = gather(pdf)[: sampler.hilbert.n_states]
 
         return state.replace(pdf=pdf)
 
