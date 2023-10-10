@@ -303,9 +303,11 @@ def jacobian(
     # jacobians is a tree with leaf shapes:
     # - (n_samples, 2, ...) if mode complex, holding the real and imaginary jacobian
     # - (n_samples, ...) if mode real/holomorphic
+    # here we capture f with a partial since the shard_map inside vmap_chunked
+    # does not support non-array arguments
     jacobians = vmap_chunked(
-        jacobian_fun, in_axes=(None, None, 0), chunk_size=chunk_size
-    )(f, params, samples)
+        partial(jacobian_fun, f), in_axes=(None, 0), chunk_size=chunk_size
+    )(params, samples)
 
     if pdf is None:
         sqrt_n_samp = math.sqrt(samples.shape[0] * mpi.n_nodes)  # maintain weak type
