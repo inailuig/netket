@@ -26,55 +26,62 @@ def replicate_sharding(f):
 
         @wraps(f)
         def _f(self, x):
-            xp_mels_np = []
-            n_conn_dev = []
-            for s in x.addressable_shards:
-                xp, mels = f(self, s.data)
-                xp_mels_np.append((xp, mels))
-                n_conn_dev.append(
-                    jax.device_put(
-                        np.array(
-                            [
-                                mels.shape[-1],
-                            ]
-                        ),
-                        s.device,
+            if isinstance(x, jax.Array) and len(x.devices()) > 1:  # sharded
+                xp_mels_np = []
+                n_conn_dev = []
+                for s in x.addressable_shards:
+                    xp, mels = f(self, s.data)
+                    xp_mels_np.append((xp, mels))
+                    n_conn_dev.append(
+                        jax.device_put(
+                            np.array(
+                                [
+                                    mels.shape[-1],
+                                ]
+                            ),
+                            s.device,
+                        )
                     )
+                # numba might pad every x differently, so here we pad all to the common max over devices and all processes
+                n_conn = jax.make_array_from_single_device_arrays(
+                    (len(x.devices()),),
+                    jax.sharding.PositionalSharding(list(x.devices())),
+                    n_conn_dev,
                 )
-            # numba might pad every x differently, so here we pad all to the common max over devices and all processes
-            n_conn = jax.make_array_from_single_device_arrays(
-                (len(x.devices()),),
-                jax.sharding.PositionalSharding(list(x.devices())),
-                n_conn_dev,
-            )
-            n_conn_max = int(jax.jit(lambda x: x.max())(n_conn))
-            xp_dev = []
-            mels_dev = []
-            for (xp, mels), s in zip(xp_mels_np, x.addressable_shards):
-                npad = n_conn_max - mels.shape[-1]
-                if npad > 0:
-                    mels = np.pad(
-                        mels, pad_width=((0, 0),) * (mels.ndim - 1) + ((0, npad),)
-                    )
-                    xp = np.pad(
-                        xp,
-                        pad_width=((0, 0),) * (mels.ndim - 1)
-                        + ((0, npad),)
-                        + ((0, 0),),
-                    )
-                    xp[..., -npad:, :] = xp[..., :1, :]
-                xp_dev.append(jax.device_put(xp, s.device))
-                mels_dev.append(jax.device_put(mels, s.device))
-            shape = x.shape[:-1] + (n_conn_max,)
-            xp = jax.make_array_from_single_device_arrays(
-                shape + x.shape[-1:],
-                x.sharding.reshape(
-                    x.sharding.shape[:-1] + (1,) + x.sharding.shape[-1:]
-                ),
-                xp_dev,
-            )
-            mels = jax.make_array_from_single_device_arrays(shape, x.sharding, mels_dev)
-            return xp, mels
+                n_conn_max = int(jax.jit(lambda x: x.max())(n_conn))
+                xp_dev = []
+                mels_dev = []
+                for (xp, mels), s in zip(xp_mels_np, x.addressable_shards):
+                    npad = n_conn_max - mels.shape[-1]
+                    if npad > 0:
+                        mels = np.pad(
+                            mels, pad_width=((0, 0),) * (mels.ndim - 1) + ((0, npad),)
+                        )
+                        xp = np.pad(
+                            xp,
+                            pad_width=((0, 0),) * (mels.ndim - 1)
+                            + ((0, npad),)
+                            + ((0, 0),),
+                        )
+                        xp[..., -npad:, :] = xp[..., :1, :]
+                    xp_dev.append(jax.device_put(xp, s.device))
+                    mels_dev.append(jax.device_put(mels, s.device))
+                shape = x.shape[:-1] + (n_conn_max,)
+                xp = jax.make_array_from_single_device_arrays(
+                    shape + x.shape[-1:],
+                    x.sharding.reshape(
+                        x.sharding.shape[:-1] + (1,) + x.sharding.shape[-1:]
+                    ),
+                    xp_dev,
+                )
+                mels = jax.make_array_from_single_device_arrays(
+                    shape, x.sharding, mels_dev
+                )
+                return xp, mels
+            elif isinstance(x, jax.Array):  # and len(x.devices()) == 1; single device
+                return jax.device_put(f(self, x), device=x.device())
+            else:
+                return f(self, x)
 
         return _f
     else:
