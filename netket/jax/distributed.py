@@ -10,6 +10,29 @@ from jax.experimental.shard_map import shard_map
 from netket.utils import config
 
 
+# @partial(jax.jit, static_argnums=0)
+# def _replicate_shmap_callback(f, x):
+#     # TODO where to get mesh and axes from without hardcoding them here?
+#     mesh = Mesh(jax.devices(), axis_names=("i"))
+#
+#     @partial(shard_map, mesh=mesh, in_specs=(P("i")), out_specs=P("i"))
+#     def _f(x):
+#         # here we infer the output shape by doing eval_shape by hand
+#         # TODO better way?
+#         dummy_x = np.zeros((1,) * (x.ndim - 1) + x.shape[-1:], x.dtype)
+#         dummy_xp, dummy_mels = f(dummy_x)
+#         xp_shape = jax.ShapeDtypeStruct(
+#             x.shape[:-1] + dummy_xp.shape[x.ndim - 1 :], dummy_xp.dtype
+#         )
+#         mels_shape = jax.ShapeDtypeStruct(
+#             x.shape[:-1] + dummy_mels.shape[x.ndim - 1 :], dummy_mels.dtype
+#         )
+#         result_shape = (xp_shape, mels_shape)
+#         return jax.pure_callback(f, result_shape, x, vectorized=True)
+#
+#     return _f(x)
+
+
 def replicate_sharding(f):
     """
     Wrapper for python get_conn_padded to make it work with shared/global device arrays.
