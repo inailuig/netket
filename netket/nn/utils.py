@@ -119,8 +119,9 @@ def to_array(
     )
     if allgather and config.netket_experimental_sharding:
         # for simplicity we gather here outside of jit
-        # alternatively we could have re-jitted _to_array_rank with appropriate out_shardings
-        psi = gather(psi)[: hilbert.n_states]
+        # alternatively we could use a sharding constraint in _to_array_rank
+        psi = gather(psi)
+        psi = jax.jit(lambda x: x[: hilbert.n_states])(psi)
     return psi
 
 
