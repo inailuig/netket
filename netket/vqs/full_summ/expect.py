@@ -40,7 +40,7 @@ def _check_hilbert(A, B):
 
 # TODO: This cache is here so that we don't re-compute the sparse representation of the operators at every VMC step
 # but instead we cache the last 5 used. Should investigate a better way to implement this caching.
-@lru_cache(5)
+#@lru_cache(5)
 def sparsify(Ô):
     """
     Converts to sparse but also cache the sparsificated result to speed up.
