@@ -40,7 +40,7 @@ jobs:
             env: NUMBA_BOUNDSCHECK=1
 
           - os: ubuntu-latest
-            python-version: "3.11"
+            python-version: "3.9"
             mpi: ""
             main_tests: true
             oldest_deps: false
