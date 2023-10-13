@@ -189,42 +189,31 @@ def sharding_decorator(f, sharded_args_tree, reduction_op_tree=False):
         @wraps(f)
         def _fun(*args):
             args = args_treedef.flatten_up_to(args)
-            n_args = len(args)
 
             _sele = lambda cond, xs: tuple(x for c, x in zip(cond, xs) if c)
             _not = lambda t: tuple(not x for x in t)
             _sele2 = lambda cond, x, y: tuple(x if c else y for c in cond)
 
-            # workaround for shard_map not supporting non-array args part 1/3
+            # workaround for shard_map not supporting non-array args part 1/2
             nonarray_args = tuple(not hasattr(a, "dtype") for a in args)
-            nonarray_argnums = tuple(i for i, c in enumerate(nonarray_args) if c)
-            for c1, c2 in zip(nonarray_args, sharded_args):
-                assert not (c1 and c2)
-            args_nonarray = _sele(nonarray_args, args)
-            args = _sele(_not(nonarray_args), args)
+            args = tuple(
+                Partial(lambda: a) if c else a for a, c in zip(args, nonarray_args)
+            )
 
             mesh = Mesh(jax.devices(), axis_names=("i"))
             in_specs = _sele2(sharded_args, P("i"), P())
             out_specs = out_treedef.unflatten(_sele2(reduction_op, P(), P("i")))
 
-            # workaround for shard_map not supporting non-array args part 2/3
-            in_specs = tuple(
-                s for i, s in enumerate(in_specs) if i not in nonarray_argnums
-            )
-
             @partial(shard_map, mesh=mesh, in_specs=in_specs, out_specs=out_specs)
             def _f(*args):
-                # workaround for shard_map not supporting non-array args part 3/3
-                it = iter(args)
-                it_nonarray = iter(args_nonarray)
-                args = tuple(
-                    next(it_nonarray) if i in nonarray_argnums else next(it)
-                    for i in range(n_args)
-                )
+                # workaround for shard_map not supporting non-array args part 2/2
+                args = tuple(a() if c else a for a, c in zip(args, nonarray_args))
 
                 res = f(*args_treedef.unflatten(args))
 
                 # apply reductions
+                # _id = lambda x: x
+                # _wrap = lambda x: Partial(lambda : x)
                 def _sele_op(o):
                     if o is False:
                         return lambda x: x
