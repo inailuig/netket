@@ -4,6 +4,7 @@ import numpy as np
 
 import jax
 import jax.numpy as jnp
+from jax.tree_util import Partial
 from jax.sharding import Mesh, PartitionSpec as P
 from jax.experimental.shard_map import shard_map
 
@@ -176,6 +177,7 @@ def sharding_decorator(f, sharded_args_tree, reduction_op_tree=False):
         reduction_op_tree: a tuple/pyrtree of reduction_op, where for each output:
             reduction_op is e.g. jax.lax.psum if it is to be reduced, then f_wrapped returns a replicated array
             reduction op is False if it is not to be reduced, then f_wrapped returns a sharded array
+            reduction op is True if it is not an array/pytree, then it is returned as python object
     Returns :
         f_wrapped: wrapped version of f
     """
@@ -223,20 +225,25 @@ def sharding_decorator(f, sharded_args_tree, reduction_op_tree=False):
                 res = f(*args_treedef.unflatten(args))
 
                 # apply reductions
-                # using lambda inside list generator does not seem to work as intended, so we define it outside
-                _id = lambda x: x
-                reductions = [
-                    _id
-                    if o is False
-                    else partial(jax.tree_map, partial(o, axis_name="i"))
-                    for o in reduction_op
-                ]
+                def _sele_op(o):
+                    if o is False:
+                        return lambda x: x
+                    if o is True:
+                        return lambda x: Partial(lambda: x)
+                    else:
+                        return partial(jax.tree_map, partial(o, axis_name="i"))
+
+                reductions = [_sele_op(o) for o in reduction_op]
                 res = out_treedef.flatten_up_to(res)
                 res = [f(r) for f, r in zip(reductions, res)]
                 res = out_treedef.unflatten(res)
                 return res
 
-            return _f(*args)
+            res = _f(*args)
+            res = out_treedef.flatten_up_to(res)
+            res = [a() if c is True else a for a, c in zip(res, reduction_op)]
+            res = out_treedef.unflatten(res)
+            return res
 
         return _fun
 
