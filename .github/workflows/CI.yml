@@ -39,8 +39,8 @@ jobs:
             oldest_deps: false
             env: NUMBA_BOUNDSCHECK=1
 
-          - os: ubuntu-latest
-            python-version: "3.9"
+          - os: macos-latest
+            python-version: "3.10"
             mpi: ""
             main_tests: true
             oldest_deps: false
