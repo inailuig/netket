@@ -261,7 +261,7 @@ def test_reassemble_complex(e):
 
 
 @common.named_parametrize("holomorphic", [True, False])
-@common.named_parametrize("n_samp", [24, 1024])
+@common.named_parametrize("n_samp", [48, 1024])
 @common.named_parametrize("jit", [True, False])
 @pytest.mark.parametrize("outdtype, pardtype", all_test_types)
 @common.named_parametrize("chunk_size", [8, None])
