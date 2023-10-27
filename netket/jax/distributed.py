@@ -197,7 +197,7 @@ def sharding_decorator(f, sharded_args_tree, reduction_op_tree=False):
             # workaround for shard_map not supporting non-array args part 1/2
             nonarray_args = tuple(not hasattr(a, "dtype") for a in args)
             args = tuple(
-                Partial(lambda: a) if c else a for a, c in zip(args, nonarray_args)
+                Partial(partial(lambda x: x, a)) if c else a for a, c in zip(args, nonarray_args)
             )
 
             mesh = Mesh(jax.devices(), axis_names=("i"))
@@ -218,7 +218,7 @@ def sharding_decorator(f, sharded_args_tree, reduction_op_tree=False):
                     if o is False:
                         return lambda x: x
                     if o is True:
-                        return lambda x: Partial(lambda: x)
+                        return lambda x: Partial(partial(lambda x: x, x))
                     else:
                         return partial(jax.tree_map, partial(o, axis_name="i"))
 
