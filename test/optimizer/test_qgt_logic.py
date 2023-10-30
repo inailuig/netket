@@ -180,9 +180,9 @@ class Example:
         k1, k2, k3, k4, k5 = jax.random.split(k, 5)
 
         self.samples = put_global(jax.random.normal(k1, (n_samp, 2)))
-        self.w = put_global(jax.random.normal(k2, (n_samp,), self.dtype).astype(
-            self.dtype
-        ))  # TODO remove astype once its fixed in jax
+        self.w = put_global(
+            jax.random.normal(k2, (n_samp,), self.dtype).astype(self.dtype)
+        )  # TODO remove astype once its fixed in jax
         self.params = tree_random_normal_like(k3, self.target)
         self.v = tree_random_normal_like(k4, self.target)
         self.grad = tree_random_normal_like(k5, self.target)

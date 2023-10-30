@@ -85,7 +85,15 @@ def _test_stats_mean_std(hi, ham, ma, n_chains):
 
 
 @common.skipif_mpi
-@pytest.mark.parametrize("n_chains", [1*jax.device_count(), 2*jax.device_count(), 16*jax.device_count(), 32*jax.device_count()])
+@pytest.mark.parametrize(
+    "n_chains",
+    [
+        1 * jax.device_count(),
+        2 * jax.device_count(),
+        16 * jax.device_count(),
+        32 * jax.device_count(),
+    ],
+)
 def test_stats_mean_std(n_chains):
     hi, ham, ma = _setup()
     _test_stats_mean_std(hi, ham, ma, n_chains)
