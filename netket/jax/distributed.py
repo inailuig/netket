@@ -9,6 +9,7 @@ from jax.sharding import Mesh, PartitionSpec as P
 from jax.experimental.shard_map import shard_map
 
 from netket.utils import config
+from netket.errors import concrete_or_error, NumbaOperatorGetConnDuringTracingError
 
 
 def replicate_sharding(f):
@@ -16,6 +17,8 @@ def replicate_sharding(f):
     Wrapper for python get_conn_padded to make it work with shared/global device arrays.
     Calls f on every shard, and puts the results back on the devices with the correct sharding.
     The input to f is assumed to have PositionalSharding (or equivalent) along a single batch axis.
+
+    The resulting function cannot be used inside of jit.
 
     Args:
         f: a python get_conn_padded (which takes self, x and maps it to (xp,mels))
@@ -27,6 +30,8 @@ def replicate_sharding(f):
 
         @wraps(f)
         def _f(self, x):
+            concrete_or_error(None, x, NumbaOperatorGetConnDuringTracingError, f)
+
             if isinstance(x, jax.Array) and len(x.devices()) > 1:  # sharded
                 xp_mels_np = []
                 n_conn_dev = []
