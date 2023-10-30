@@ -98,7 +98,7 @@ class Sampler(abc.ABC):
                 if not config.netket_experimental_sharding:
                     n_devices = mpi.n_nodes
                 else:
-                    n_devices = len(jax.devices())
+                    n_devices = jax.device_count()
 
                 n_chains_per_rank = max(int(np.ceil(n_chains / n_devices)), 1)
                 if n_devices > 1 and mpi.rank == 0:
@@ -116,8 +116,10 @@ class Sampler(abc.ABC):
                             category=UserWarning,
                             stacklevel=2,
                         )
-
-            kwargs["n_chains_per_rank"] = n_chains_per_rank
+            if not config.netket_experimental_sharding:
+                kwargs["n_chains_per_rank"] = n_chains_per_rank
+            else:
+                kwargs["n_chains_per_rank"] = n_chains_per_rank*jax.device_count()
 
         return (hilbert,), kwargs
 
