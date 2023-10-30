@@ -106,10 +106,12 @@ def put_global(inp_data, axis=0, pad=False, pad_value=None):
     distribute a local array equally along an axis to all (local and global) devices
     The size of the axis needs to be divisible by the number of devices.
     each process needs to have the whole array (parts not belonging to it can be filled with garbage)
+
     Args:
         inp_data: the full array (on every process)
         axis: (optional) axis alogn which to distribute
-    returns:
+
+    Returns:
         a distributed jax.Array
     """
     if pad:
@@ -142,8 +144,10 @@ def put_global(inp_data, axis=0, pad=False, pad_value=None):
 def extract_replicated(t):
     """
     Extract the value of a fully replicated global device array.
+
     Args:
         t: a jax Array (or a pytree of jax Arrays)
+
     Returns:
         A locally adressable representation of t
     """
@@ -183,6 +187,7 @@ def sharding_decorator(f, sharded_args_tree, reduction_op_tree=False):
             reduction_op is e.g. jax.lax.psum if it is to be reduced, then f_wrapped returns a replicated array
             reduction op is False if it is not to be reduced, then f_wrapped returns a sharded array
             reduction op is True if it is not an array/pytree, then it is returned as python object
+
     Returns :
         f_wrapped: wrapped version of f
     """
