@@ -119,7 +119,7 @@ class Sampler(abc.ABC):
             if not config.netket_experimental_sharding:
                 kwargs["n_chains_per_rank"] = n_chains_per_rank
             else:
-                kwargs["n_chains_per_rank"] = n_chains_per_rank*jax.device_count()
+                kwargs["n_chains_per_rank"] = n_chains_per_rank * jax.device_count()
 
         return (hilbert,), kwargs
 
