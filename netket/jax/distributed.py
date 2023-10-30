@@ -118,7 +118,7 @@ def put_global(inp_data, axis=0, pad=False, pad_value=None):
         device_count = jax.device_count()
         n_pad = math.ceil(inp_data.shape[0] / device_count) * device_count - n
         inp_data = jnp.pad(inp_data, ((0, n_pad), (0, 0)))
-        if pad_value is not None:
+        if pad_value is not None and n_pad>0:
             inp_data = inp_data.at[-n_pad:].set(pad_value)
 
     shape = [
