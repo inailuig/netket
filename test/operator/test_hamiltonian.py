@@ -138,9 +138,10 @@ def test_jax_conn(graph, partial_hilbert, partial_H_pair, dtype):
     n_conn1 = H1.n_conn(σ)
     n_conn2 = H2.n_conn(σ)
 
-    assert isinstance(σp1, np.ndarray)
-    assert isinstance(mels1, np.ndarray)
-    assert isinstance(n_conn1, np.ndarray)
+    if not nk.config.netket_experimental_sharding:
+        assert isinstance(σp1, np.ndarray)
+        assert isinstance(mels1, np.ndarray)
+        assert isinstance(n_conn1, np.ndarray)
     σp2 = np.asarray(σp2)
     mels2 = np.asarray(mels2)
     n_conn2 = np.asarray(n_conn2)
@@ -179,5 +180,5 @@ def test_jax_conn(graph, partial_hilbert, partial_H_pair, dtype):
     for σp1_i, σp2_i, mels1_i, mels2_i in zip(σp1, σp2, mels1, mels2):
         σp1_i, mels1_i = canonize(σp1_i, mels1_i)
         σp2_i, mels2_i = canonize(σp2_i, mels2_i)
-        np.testing.assert_equal(σp1_i, σp2_i)
+        np.testing.assert_equal(np.asarray(σp1_i), np.asarray(σp2_i))
         np.testing.assert_equal(mels1_i, mels2_i)
