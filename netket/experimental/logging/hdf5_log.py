@@ -17,6 +17,8 @@ import numpy as np
 from flax.serialization import to_bytes
 from flax.core import pop as fpop, FrozenDict
 
+from netket import config
+
 _mode_shorthands = {"write": "w", "append": "a", "fail": "x"}
 
 
@@ -129,6 +131,11 @@ class HDF5Log:
                 flushed to file
         """
         import h5py  # noqa: F401
+
+        if config.netket_experimental_sharding:
+            raise NotImplementedError(
+                "HDF5Log is not yet compatible with netket.config.netket_experimental_sharding.\nPlease use another logger"
+            )
 
         super().__init__()
 
