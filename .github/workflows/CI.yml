@@ -47,6 +47,7 @@ jobs:
             env:
               NETKET_EXPERIMENTAL_SHARDING: 1
               NETKET_EXPERIMENTAL_SHARDING_CPU: 2
+              PYTEST_XDIST_AUTO_NUM_WORKERS: 0
 
         # python-version: [3.9, 3.10, 3.11]
         # os: [ubuntu-latest, macos-latest]
