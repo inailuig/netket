@@ -48,13 +48,16 @@ def split_array_mpi(array: Array) -> Array:
         A numpy array, of potentially different state on every mpi rank.
     """
 
-    n_states = array.shape[0]
-    states_n = np.arange(n_states)
+    if mpi.n_nodes > 1:
+        n_states = array.shape[0]
+        states_n = np.arange(n_states)
 
-    # divide the hilbert space in chunks for each node
-    states_per_rank = np.array_split(states_n, mpi.n_nodes)
+        # divide the hilbert space in chunks for each node
+        states_per_rank = np.array_split(states_n, mpi.n_nodes)
 
-    return array[states_per_rank[mpi.rank]]
+        return array[states_per_rank[mpi.rank]]
+    else:
+        return array
 
 
 def to_array(
