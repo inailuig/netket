@@ -26,7 +26,7 @@ from netket.utils.types import Array, PyTree
 from netket.hilbert import DiscreteHilbert
 
 from netket.utils import config
-from netket.jax.distributed import gather, put_global
+from netket.jax.distributed import extract_replicated, gather, put_global
 
 from flax.traverse_util import flatten_dict, unflatten_dict
 from flax.core import unfreeze
@@ -124,7 +124,10 @@ def to_array(
         # for simplicity we gather here outside of jit
         # alternatively we could use a sharding constraint in _to_array_rank
         psi = gather(psi)
-        psi = jax.jit(lambda x: x[: hilbert.n_states])(psi)
+        # make it a local single-device array, so that we can operate with e.g.
+        # a sparse scipy array on it
+        psi = extract_replicated(psi)
+        psi = psi[: hilbert.n_states]
     return psi
 
 
