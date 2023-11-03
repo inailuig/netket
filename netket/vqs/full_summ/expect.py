@@ -48,14 +48,6 @@ def sparsify(Ô):
     return Ô.to_sparse()
 
 
-@jax.jit  # jit for gda
-def _expect(O, Ψ):
-    OΨ = O @ Ψ
-    expval_O = (Ψ.conj() * OΨ).sum()
-    variance = jnp.sum(jnp.abs(OΨ - expval_O * Ψ) ** 2)
-    return Stats(mean=expval_O, error_of_mean=0.0, variance=variance)
-
-
 @dispatch
 def expect(vstate: FullSumState, Ô: DiscreteOperator) -> Stats:  # noqa: F811
     _check_hilbert(vstate, Ô)
@@ -66,7 +58,11 @@ def expect(vstate: FullSumState, Ô: DiscreteOperator) -> Stats:  # noqa: F811
     # TODO: This performs the full computation on all MPI ranks.
     # It would be great if we could split the computation among ranks.
 
-    return _expect(O, Ψ)
+    OΨ = O @ Ψ
+    expval_O = (Ψ.conj() * OΨ).sum()
+
+    variance = jnp.sum(jnp.abs(OΨ - expval_O * Ψ) ** 2)
+    return Stats(mean=expval_O, error_of_mean=0.0, variance=variance)
 
 
 @expect_and_grad.dispatch
@@ -110,7 +106,7 @@ def expect_and_forces_fullsum(
 
     O = sparsify(Ô)
     Ψ = vstate.to_array()
-    OΨ = jax.jit(lambda x, y: x @ y)(O, Ψ)  # jit for gda
+    OΨ = O @ Ψ
 
     expval_O, Ō_grad, new_model_state = _exp_forces(
         vstate._apply_fun,

@@ -78,16 +78,10 @@ class ExactSampler(Sampler):
         return ExactSamplerState(pdf=pdf, rng=seed)
 
     def _reset(sampler, machine, parameters, state):
-        # TODO if machine_pow is a small integer we could use faster code path
-        # jit for gda
-        @jax.jit
-        def psi_to_pdf(v, machine_pow):
-            pdf = jnp.absolute(v**machine_pow)
-            return pdf / pdf.sum()
-
-        pdf = psi_to_pdf(
-            to_array(sampler.hilbert, machine.apply, parameters), sampler.machine_pow
+        pdf = jnp.absolute(
+            to_array(sampler.hilbert, machine.apply, parameters) ** sampler.machine_pow
         )
+        pdf = pdf / pdf.sum()
 
         return state.replace(pdf=pdf)
 
