@@ -124,9 +124,9 @@ def to_array(
         # for simplicity we gather here outside of jit
         # alternatively we could use a sharding constraint in _to_array_rank
         psi = gather(psi)
-        # make it a local single-device array, so that we can operate with e.g.
-        # a sparse scipy array on it
-        psi = extract_replicated(psi)
+        # make it a local numpy array, so that we can operate with e.g.
+        # a sparse scipy array on it and jax thinks its replicated next time we pass it to jit
+        psi = np.asarray(extract_replicated(psi))
         psi = psi[: hilbert.n_states]
     return psi
 
