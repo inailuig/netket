@@ -116,7 +116,6 @@ def check_chunk_size(chunk_argnums, chunk_size, *primals):
 
 def _vjp_chunked(
     fun,
-    *primals,
     has_aux,
     chunk_argnums,
     chunk_size,
@@ -129,18 +128,13 @@ def _vjp_chunked(
     if has_aux:
         raise NotImplementedError
     else:
-        _vjp_fun = _value_and_vjp_fun_chunked if return_forward else _vjp_fun_chunked
-
-        return Partial(
-            HashablePartial(
-                _vjp_fun,
-                fun,
-                chunk_argnums=chunk_argnums,
-                nondiff_argnums=nondiff_argnums,
-                chunk_size=chunk_size,
-                conjugate=conjugate,
-            ),
-            primals,
+        return HashablePartial(
+            _value_and_vjp_fun_chunked if return_forward else _vjp_fun_chunked,
+            fun,
+            chunk_argnums=chunk_argnums,
+            nondiff_argnums=nondiff_argnums,
+            chunk_size=chunk_size,
+            conjugate=conjugate,
         )
 
 
@@ -236,17 +230,6 @@ def vjp_chunked(
     if chunk_argnums == ():
         chunk_size = None
 
-    _vjpc = HashablePartial(
-        _vjp_chunked,
-        fun,
-        has_aux=has_aux,
-        chunk_argnums=chunk_argnums,
-        chunk_size=chunk_size,
-        nondiff_argnums=nondiff_argnums,
-        return_forward=return_forward,
-        conjugate=conjugate,
-    )
-
     if config.netket_experimental_sharding and chunk_size is not None:
         if return_forward:
             raise NotImplementedError
@@ -271,12 +254,18 @@ def vjp_chunked(
         )(*primals)
 
         if chunk_size is not None:
-            vjp_fun = sharding_decorator(_vjpc, sharded_args_tree=sharded_args)(
-                *primals
+            _vjpc = _vjp_chunked(
+                fun,
+                has_aux=has_aux,
+                chunk_argnums=chunk_argnums,
+                chunk_size=chunk_size,
+                nondiff_argnums=nondiff_argnums,
+                return_forward=return_forward,
+                conjugate=conjugate,
             )
             vjp_fun_sh = Partial(
                 sharding_decorator(
-                    vjp_fun.func,
+                    _vjpc,
                     sharded_args_tree=(sharded_args, True),
                     reduction_op_tree=red_ops,
                 ),
@@ -312,4 +301,13 @@ def vjp_chunked(
 
             return Partial(__vjp_fun, vjp_fun)
     else:
-        return _vjpc(*primals)
+        _vjpc = _vjp_chunked(
+            fun,
+            has_aux=has_aux,
+            chunk_argnums=chunk_argnums,
+            chunk_size=chunk_size,
+            nondiff_argnums=nondiff_argnums,
+            return_forward=return_forward,
+            conjugate=conjugate,
+        )
+        return Partial(_vjpc, primals)
