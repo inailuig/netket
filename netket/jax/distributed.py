@@ -169,6 +169,18 @@ def gather(x):
     return jax.jit(_identity, out_shardings=x.sharding.replicate())(x)
 
 
+def broadcast(x):
+    """
+    broadcast an array to all devices. Input on different processes is assumed to be the same
+    """
+    return jax.jit(
+        _identity,
+        out_shardings=jax.sharding.PositionalSharding(jax.devices())
+        .replicate()
+        .reshape((1,) * x.ndim),
+    )(x)
+
+
 def sharding_decorator(f, sharded_args_tree, reduction_op_tree=False):
     """
     A decorator which wraps a function so that it is evaluated on every shard of the distributed arguments,
