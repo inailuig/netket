@@ -132,7 +132,7 @@ def _vjp_chunked(
         _vjp_fun = _value_and_vjp_fun_chunked if return_forward else _vjp_fun_chunked
 
         return Partial(
-            partial(
+            HashablePartial(
                 _vjp_fun,
                 fun,
                 chunk_argnums=chunk_argnums,
@@ -144,6 +144,18 @@ def _vjp_chunked(
         )
 
 
+@partial(
+    jax.jit,
+    static_argnames=(
+        "fun",
+        "has_aux",
+        "chunk_argnums",
+        "chunk_size",
+        "nondiff_argnums",
+        "return_forward",
+        "conjugate",
+    ),
+)
 def vjp_chunked(
     fun,
     *primals,
