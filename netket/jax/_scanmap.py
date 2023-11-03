@@ -82,10 +82,27 @@ def scan_append_reduce(f, x, append_cond, op=_tree_add):
         y = f(x)
         y_op = _get_op_part(y)
         y_append = _get_append_part(y)
-        # select here to avoid the user having to specify the zero element for op
+
         y_reduce = jax.tree_map(
             partial(jax.lax.select, is_first), y_op, op(y_carry, y_op)
         )
+
+        # TODO (c) remove the following workaround once the jax bug is fixed
+        # TODO put link to issue here
+        if False:
+            # select here to avoid the user having to specify the zero element for op
+            y_reduce = jax.tree_map(
+                partial(jax.lax.select, is_first), y_op, op(y_carry, y_op)
+            )
+        else:  # workaround
+            if op is _tree_add:
+                # the zeros in carry_init above are the 0 element of _tree_add
+                # so we don't need the select
+                y_reduce = op(y_carry, y_op)
+            else:
+                raise NotimplementedError(
+                    "custom reduction op currently not supported due to jax bug (segfault) on mutliple gpus"
+                )
         return (False, y_reduce), y_append
 
     (_, res_op), res_append = jax.lax.scan(f_, carry_init, x, unroll=1)
