@@ -100,7 +100,7 @@ def scan_append_reduce(f, x, append_cond, op=_tree_add):
                 # so we don't need the select
                 y_reduce = op(y_carry, y_op)
             else:
-                raise NotimplementedError(
+                raise NotImplementedError(
                     "custom reduction op currently not supported due to jax bug (segfault) on mutliple gpus"
                 )
         return (False, y_reduce), y_append
