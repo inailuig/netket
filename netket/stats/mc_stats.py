@@ -20,7 +20,7 @@ import numpy as np
 from jax import numpy as jnp
 
 from netket.utils import config, mpi, struct
-from netket.jax.distributed import extract_replicated
+from netket.jax.sharding import extract_replicated
 
 from . import mean as _mean
 from . import var as _var

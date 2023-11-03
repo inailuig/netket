@@ -26,7 +26,7 @@ from netket.utils.types import Array, PyTree
 from netket.hilbert import DiscreteHilbert
 
 from netket.utils import config
-from netket.jax.distributed import extract_replicated, gather, put_global
+from netket.jax.sharding import extract_replicated, gather, put_global
 
 from flax.traverse_util import flatten_dict, unflatten_dict
 from flax.core import unfreeze

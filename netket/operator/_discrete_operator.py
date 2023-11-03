@@ -21,7 +21,7 @@ from scipy.sparse import csr_matrix as _csr_matrix
 from netket.hilbert import DiscreteHilbert
 from netket.operator import AbstractOperator
 from netket.utils.optional_deps import import_optional_dependency
-from netket.jax.distributed import replicate_sharding
+from netket.jax.sharding import replicate_sharding
 
 
 class DiscreteOperator(AbstractOperator):

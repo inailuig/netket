@@ -11,7 +11,7 @@ from netket.jax import (
 )
 from netket.utils import HashablePartial
 from netket.utils import config
-from netket.jax.distributed import sharding_decorator
+from netket.jax.sharding import sharding_decorator
 
 from ._scanmap import _multimap
 from ._chunk_utils import _chunk as _tree_chunk, _unchunk as _tree_unchunk
@@ -84,7 +84,7 @@ def _gen_append_cond_vjp(primals, nondiff_argnums, chunk_argnums):
     return tuple(map(lambda i: i in chunk_argnums, diff_argnums))
 
 
-_gen_append_cond_value_vjp = compose(lambda t: (True, *t), _gen_append_cond_vjp)
+_gen_append_cond_value_vjp = compose(lambda t: (True,) + t, _gen_append_cond_vjp)
 
 _vjp_fun_chunked = partial(
     __vjp_fun_chunked,

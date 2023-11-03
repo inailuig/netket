@@ -5,7 +5,7 @@ import netket as nk
 import numpy as np
 from functools import partial
 
-from netket.jax.distributed import put_global
+from netket.jax.sharding import put_global
 from netket import config
 
 from .. import common

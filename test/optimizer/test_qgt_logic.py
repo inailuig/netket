@@ -36,7 +36,7 @@ from netket.optimizer.qgt import (
     qgt_jacobian_pytree_logic,
     qgt_jacobian_common,
 )
-from netket.jax.distributed import put_global
+from netket.jax.sharding import put_global
 
 from .. import common
 

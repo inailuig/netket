@@ -29,7 +29,7 @@ from netket.utils.deprecation import deprecated
 from netket.utils import struct
 
 from netket.utils.config_flags import config
-from netket.jax.distributed import put_global
+from netket.jax.sharding import put_global
 
 from .base import Sampler, SamplerState
 from .rules import MetropolisRule

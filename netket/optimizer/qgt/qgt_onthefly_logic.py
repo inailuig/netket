@@ -24,7 +24,7 @@ from netket.jax import (
     scan_append,
     chunk,
 )
-from netket.jax.distributed import sharding_decorator
+from netket.jax.sharding import sharding_decorator
 
 # Stochastic Reconfiguration with jvp and vjp
 
