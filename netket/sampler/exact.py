@@ -23,6 +23,7 @@ from netket.nn import to_array
 from netket.utils import struct
 from netket.utils.deprecation import warn_deprecation
 from netket.utils.types import PyTree, SeedT
+from netket.jax.sharding import put_global
 
 from .base import Sampler, SamplerState
 
@@ -86,7 +87,7 @@ class ExactSampler(Sampler):
         return state.replace(pdf=pdf)
 
     @partial(jax.jit, static_argnums=(1, 4))
-    def _sample_chain(
+    def __sample_chain(
         sampler,
         machine: nn.Module,
         parameters: PyTree,
@@ -127,3 +128,17 @@ class ExactSampler(Sampler):
         )
 
         return samples, state.replace(rng=new_rng)
+
+    def _sample_chain(
+        sampler,
+        machine: nn.Module,
+        parameters: PyTree,
+        state: SamplerState,
+        chain_length: int,
+    ) -> tuple[jnp.ndarray, SamplerState]:
+        # run the sampling on a single device (serially)
+        # TODO implement parallel version (get rid of the callback above and it shold be easy)
+        samples, state = sampler.__sample_chain(machine, parameters, state, chain_length)
+        # distribute samples equally between devices
+        samples = put_global(samples)
+        return samples, state
