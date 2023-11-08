@@ -10,7 +10,7 @@ from jax.experimental.shard_map import shard_map
 from netket.utils import config
 
 
-def replicate_sharding_shmap(f):
+def replicate_sharding(f):
     """
     Wrapper for python get_conn_padded to make it work with shared/global device arrays.
     Not yet implemented, raises NotImplementedError
