@@ -62,67 +62,11 @@ class Sampler(abc.ABC):
     hilbert: AbstractHilbert = struct.field(pytree_node=False)
     """The Hilbert space to sample."""
 
-    n_chains_per_rank: int = struct.field(pytree_node=False, default=None, repr=False)
-    """Number of independent chains on every MPI rank."""
-
     machine_pow: int = struct.field(default=2)
     """The power to which the machine should be exponentiated to generate the pdf."""
 
     dtype: DType = struct.field(pytree_node=False, default=float)
     """The dtype of the states sampled."""
-
-    def __pre_init__(
-        self, hilbert: AbstractHilbert, n_chains: Optional[int] = None, **kwargs
-    ):
-        """
-        Construct a Monte Carlo sampler.
-
-        Args:
-            hilbert: The Hilbert space to sample.
-            n_chains: The total number of independent chains across all MPI ranks. Either specify this or `n_chains_per_rank`.
-            n_chains_per_rank: Number of independent chains on every MPI rank (default = 1).
-            machine_pow: The power to which the machine should be exponentiated to generate the pdf (default = 2).
-            dtype: The dtype of the states sampled (default = np.float64).
-        """
-
-        if "n_chains_per_rank" in kwargs:
-            if n_chains is not None:
-                raise ValueError(
-                    "Cannot specify both `n_chains` and `n_chains_per_rank`"
-                )
-        else:
-            if n_chains is None:
-                # Default value
-                n_chains_per_rank = 1
-            else:
-                if not config.netket_experimental_sharding:
-                    n_devices = mpi.n_nodes
-                else:
-                    # assume no mpi (we don't support hybrid mpi+sharding)
-                    n_devices = jax.device_count()
-
-                n_chains_per_rank = max(int(np.ceil(n_chains / n_devices)), 1)
-                if n_devices > 1 and mpi.rank == 0:
-                    if n_chains_per_rank * n_devices != n_chains:
-                        import warnings
-
-                        warnings.warn(
-                            f"Using {n_chains_per_rank} chains per rank among {n_devices} devices/ranks "
-                            f"(total={n_chains_per_rank * n_devices} instead of n_chains={n_chains}). "
-                            f"To directly control the number of chains on every rank, specify "
-                            f"`n_chains_per_rank` when constructing the sampler. "
-                            f"To silence this warning, either use `n_chains_per_rank` or use `n_chains` "
-                            f"that is a multiple of the number of MPI ranks",
-                            "(or of jax devices if using experimental sharding mode).",
-                            category=UserWarning,
-                            stacklevel=2,
-                        )
-            if not config.netket_experimental_sharding:
-                kwargs["n_chains_per_rank"] = n_chains_per_rank
-            else:
-                kwargs["n_chains_per_rank"] = n_chains_per_rank * jax.device_count()
-
-        return (hilbert,), kwargs
 
     def __post_init__(self):
         # Raise errors if hilbert is not an Hilbert

@@ -157,6 +157,9 @@ class MetropolisSampler(Sampler):
     The dtype of the sampled states can be chosen.
     """
 
+    n_chains_per_rank: int = struct.field(pytree_node=False, default=None, repr=False)
+    """Number of independent chains on every MPI rank."""
+
     rule: MetropolisRule = None
     """The Metropolis transition rule."""
     n_sweeps: int = struct.field(pytree_node=False, default=None)
@@ -194,15 +197,42 @@ class MetropolisSampler(Sampler):
                 f"The second positional argument, rule, must be a MetropolisRule but "
                 f"`type(rule)={type(rule)}`."
             )
+        n_chains = kwargs.pop('n_chains', None)
+        n_chains_per_rank = kwargs.pop('n_chains_per_rank', None)
 
-        if "n_chains" not in kwargs and "n_chains_per_rank" not in kwargs:
-            kwargs["n_chains_per_rank"] = 16
+        if config.netket_experimental_sharding:
+            n_devices = jax.device_count()
+        else:
+            n_devices = mpi.n_nodes
+        n_chains_per_device = n_chains_per_rank
 
-        # process arguments in the base
-        args, kwargs = super().__pre_init__(hilbert=hilbert, **kwargs)
-
+        if n_chains is None and n_chains_per_device is None:
+            n_chains_per_device = 16
+        elif n_chains is not None and n_chains_per_device is not None:
+                raise ValueError(
+                    "Cannot specify both `n_chains` and `n_chains_per_rank`"
+                )
+        elif n_chains is not None:
+            n_chains_per_device = max(int(np.ceil(n_chains / n_devices)), 1)
+            if n_chains_per_device * n_devices != n_chains:
+                if mpi.rank == 0 or jax.process_index()==0:
+                    import warnings
+                    warnings.warn(
+                        f"Using {n_chains_per_device} chains per rank among {n_devices} devices/ranks "
+                        f"(total={n_chains_per_device * n_devices} instead of n_chains={n_chains}). "
+                        f"To directly control the number of chains on every rank, specify "
+                        f"`n_chains_per_rank` when constructing the sampler. "
+                        f"To silence this warning, either use `n_chains_per_rank` or use `n_chains` "
+                        f"that is a multiple of the number of MPI ranks",
+                        "(or of jax devices if using experimental sharding mode).",
+                        category=UserWarning,
+                        stacklevel=2,
+                    )
+        if config.netket_experimental_sharding:
+            kwargs["n_chains_per_rank"] = n_chains_per_rank * n_devices
+        else:
+            kwargs["n_chains_per_rank"] = n_chains_per_rank
         kwargs["rule"] = rule
-
         return args, kwargs
 
     def __post_init__(self):

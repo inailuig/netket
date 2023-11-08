@@ -85,6 +85,10 @@ class ARDirectSampler(Sampler):
         """
         return True
 
+    @property
+    def n_chains_per_rank(sampler):
+        return 1
+
     def _init_cache(sampler, model, σ, key):
         variables = model.init(key, σ, 0, method=model.conditional)
         if "cache" in variables:

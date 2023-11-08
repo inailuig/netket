@@ -69,6 +69,14 @@ class ExactSampler(Sampler):
     def is_exact(sampler):
         return True
 
+    @property
+    def n_chains_per_rank(sampler):
+        return 1
+
+    @property
+    def n_chains(sampler):
+        return 1
+
     def _init_state(
         sampler,
         machine: nn.Module,
