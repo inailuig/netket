@@ -8,7 +8,7 @@ from ._scanmap import scanmap, scan_append
 
 from netket.utils import HashablePartial
 from netket.utils import config
-
+from netket.jax.sharding import sharding_decorator
 
 
 def _fun(vmapped_fun, chunk_size, argnums, *args, **kwargs):
