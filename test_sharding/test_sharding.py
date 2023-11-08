@@ -97,7 +97,7 @@ def test_grad():
 @pytest.mark.parametrize(
     "Op",
     [
-#        pytest.param(nk.operator.Ising, id="numba"),
+        pytest.param(nk.operator.Ising, id="numba"),
         pytest.param(nk.operator.IsingJax, id="jax"),
     ],
 )
@@ -185,7 +185,7 @@ def test_qgt_onthefly():
 @pytest.mark.parametrize(
     "Op",
     [
-#        pytest.param(nk.operator.Ising, id="numba"),
+        pytest.param(nk.operator.Ising, id="numba"),
         pytest.param(nk.operator.IsingJax, id="jax"),
     ],
 )
