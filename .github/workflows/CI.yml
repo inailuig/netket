@@ -1,120 +1,23 @@
 name: CI
 
 on:
-  pull_request:
-
   push:
     branches:
-      - master
+      - pjit_test
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            python-version: "3.9"
-            mpi: ""
-            doctest: true
-            oldest_deps: false
-
-          - os: ubuntu-latest
-            python-version: "3.11"
-            mpi: ""
-            main_tests: true
-            oldest_deps: false
-
-          - os: macos-latest
-            python-version: "3.10"
-            mpi: "mpich"
-            main_tests: true
-            oldest_deps: false
-
-          - os: macos-latest
-            python-version: "3.9"
-            mpi: ""
-            main_tests: true
-            oldest_deps: false
-            env: NUMBA_BOUNDSCHECK=1
-
-          - os: macos-latest
-            python-version: "3.10"
-            mpi: ""
-            main_tests: true
-            oldest_deps: false
-            env:
-              NETKET_EXPERIMENTAL_SHARDING: 1
-              NETKET_EXPERIMENTAL_SHARDING_CPU: 2
-              PYTEST_XDIST_AUTO_NUM_WORKERS: 0
-
-        # python-version: [3.9, 3.10, 3.11]
-        # os: [ubuntu-latest, macos-latest]
-
-    env:
-      MPICH_INTERFACE_HOSTNAME: localhost
-      USE_MPI: ${{ matrix.mpi }}
+    runs-on: self-hosted
 
     steps:
       - uses: actions/checkout@v3
         with:
           submodules: true
 
-      - name: Set up Python ${{ matrix.python-version }} on ${{ matrix.os }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Setup MPI
-        uses: mpi4py/setup-mpi@v1
-        if: matrix.mpi != ''
-        with:
-          mpi: ${{ matrix.mpi }}
-
-      - name: Get pip cache dir
-        id: pip-cache
+      - name: Pip install packages
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install wheel
-          echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
-
-      - name: Pip install oldest dependencies
-        if: matrix.oldest_deps
-        run: |
-          pip install --upgrade toml
-          python conf/compute_oldest_dependencies.py
-          pip install --upgrade -r oldest_requirements.txt
           pip install -e ".[dev,extra]"
 
-      - name: Pip install packages
-        if: ${{ ! matrix.oldest_deps }}
-        run: |
-          pip install jaxlib
-          if [ -z "${{ matrix.mpi }}" ]; then
-            pip install -e ".[dev,extra]"
-          else
-            pip install -e ".[dev,mpi]"
-          fi
-          pip install dm-haiku
-
       - name: Netket tests
-        if: ${{ matrix.main_tests }}
         run: |
-          export NETKET_EXPERIMENTAL=1
-          pytest --cov=netket --cov-append test
-
-      - name: NetKet docstring tests
-        if: ${{ matrix.doctest }}
-        run: |
-          pytest --doctest-continue-on-failure --doctest-modules netket/
-
-      - name: MPI tests
-        if: matrix.mpi != ''
-        run: |
-          mpirun -host localhost:2 -np 2 coverage run -m pytest -n 0 test
-          coverage combine --append
-
-      - name: Upload coverage reports to Codecov
-        if: always()
-        uses: codecov/codecov-action@v3
+          test_sharding/run_test_sharding_distributed.sh
