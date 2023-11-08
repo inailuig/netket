@@ -29,6 +29,7 @@ from netket.vqs import (
     MCState,
     FullSumState,
 )
+from netket.jax import tree_cast
 
 from netket.experimental.dynamics import RKIntegratorConfig
 
@@ -168,11 +169,7 @@ def odefun_tdvp(  # noqa: F811
     driver._dw, _ = qgt.solve(driver.linear_solver, driver._loss_grad, x0=initial_dw)
 
     # If parameters are real, then take only real part of the gradient (if it's complex)
-    driver._dw = jax.tree_map(
-        lambda x, target: (x if jnp.iscomplexobj(target) else x.real),
-        driver._dw,
-        state.parameters,
-    )
+    driver._dw = tree_cast(driver._dw, self.state.parameters)
 
     return driver._dw
 
@@ -185,10 +182,6 @@ def _map_parameters(forces, parameters, loss_grad_factor, propagation_type, stat
         parameters,
     )
 
-    forces = jax.tree_map(
-        lambda x, target: (x if jnp.iscomplexobj(target) else x.real),
-        forces,
-        parameters,
-    )
+    forces = tree_cast(forces, parameters)
 
     return forces
