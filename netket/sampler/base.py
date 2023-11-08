@@ -17,11 +17,12 @@ from typing import Optional, Union, Callable
 from collections.abc import Iterator
 
 import numpy as np
-
+import jax
 from jax import numpy as jnp
 from flax import linen as nn
 
 from netket import jax as nkjax
+from netket import config
 from netket.hilbert import AbstractHilbert
 from netket.utils import mpi, get_afun_if_module, wrap_afun
 from netket.utils.deprecation import deprecated
@@ -94,7 +95,11 @@ class Sampler(abc.ABC):
                 # Default value
                 n_chains_per_rank = 1
             else:
-                n_devices = mpi.n_nodes
+                if not config.netket_experimental_sharding:
+                    n_devices = mpi.n_nodes
+                else:
+                    # assume no mpi (we don't support hybrid mpi+sharding)
+                    n_devices = jax.device_count()
 
                 n_chains_per_rank = max(int(np.ceil(n_chains / n_devices)), 1)
                 if n_devices > 1 and mpi.rank == 0:
@@ -108,11 +113,14 @@ class Sampler(abc.ABC):
                             f"`n_chains_per_rank` when constructing the sampler. "
                             f"To silence this warning, either use `n_chains_per_rank` or use `n_chains` "
                             f"that is a multiple of the number of MPI ranks",
+                            "(or of jax devices if using experimental sharding mode).",
                             category=UserWarning,
                             stacklevel=2,
                         )
-
-            kwargs["n_chains_per_rank"] = n_chains_per_rank
+            if not config.netket_experimental_sharding:
+                kwargs["n_chains_per_rank"] = n_chains_per_rank
+            else:
+                kwargs["n_chains_per_rank"] = n_chains_per_rank * jax.device_count()
 
         return (hilbert,), kwargs
 
