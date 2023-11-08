@@ -1,6 +1,8 @@
 import math
 from functools import partial, wraps
 
+import numpy as np
+
 import jax
 import jax.numpy as jnp
 from jax.tree_util import Partial
@@ -9,8 +11,11 @@ from jax.experimental.shard_map import shard_map
 
 from netket.utils import config
 
+from netket.errors import concrete_or_error, NumbaOperatorGetConnDuringTracingError
 
-def replicate_sharding(f):
+
+
+def replicate_sharding_notimplemented(f):
     """
     Wrapper for python get_conn_padded to make it work with shared/global device arrays.
     Not yet implemented, raises NotImplementedError
@@ -26,6 +31,138 @@ def replicate_sharding(f):
         return _f
     else:
         return f
+
+@partial(jax.jit, static_argnums=(0,1,2))
+def _replicate_shmap_callback(f, max_conn_size, dtype, x):
+    mesh = Mesh(jax.devices(), axis_names=("i"))
+
+    @partial(shard_map, mesh=mesh, in_specs=(P("i")), out_specs=P("i"))
+    def _f(x):
+        xp_shape = jax.ShapeDtypeStruct((*x.shape[:-1], max_conn_size, x.shape[-1]), x.dtype)
+        mels_shape = jax.ShapeDtypeStruct((*x.shape[:-1], max_conn_size), dtype)
+        result_shape = (xp_shape, mels_shape)
+        def __f(x):
+            #xp, mels = f(x)
+            xp = np.zeros_like(xp_shape)
+            mels = np.zeros_like(mels_shape)
+            assert mels.shape[-1] == max_conn
+            assert xp.dtype == x.dtype
+            assert mels.dtype == dtype
+            # TODO here we could pad and cast if necessary
+            return xp.copy(), mels.copy()
+        xp, mels = jax.pure_callback(__f, result_shape, x, vectorized=False)
+        return xp, mels
+    return _f(x)
+
+
+def replicate_sharding_shmap(f):
+    """
+    Wrapper for python get_conn_padded to make it work with shared/global device arrays.
+    Calls f on every shard, and puts the results back on the devices with the correct sharding.
+    The input to f is assumed to have PositionalSharding (or equivalent) along a single batch axis.
+
+    version which uses pure_callback and jax.experimental.shard_map internally
+
+    Args:
+        f: a python get_conn_padded (which takes self, x and maps it to (xp,mels))
+    """
+    def _f(self, x):
+        print('uu', f, self, x.shape)
+        if isinstance(x, jax.Array):
+            print('jax array')
+            return  _replicate_shmap_callback(f, self.max_conn_size, self.dtype, x)
+        else:
+            print('wasnumpy')
+            return f(self, x)
+    return _f
+
+
+#replicate_sharding = replicate_sharding_shmap
+
+
+def replicate_sharding(f):
+    """
+    Wrapper for python get_conn_padded to make it work with shared/global device arrays.
+    Calls f on every shard, and puts the results back on the devices with the correct sharding.
+    The input to f is assumed to have PositionalSharding (or equivalent) along a single batch axis.
+
+    The resulting function cannot be used inside of jit.
+
+    Args:
+        f: a python get_conn_padded (which takes self, x and maps it to (xp,mels))
+    """
+    # ideally I would like to use a simple shard map with callback, however
+    # for that we need to know the shape a priori which would require an extra n_conn call.
+
+    if config.netket_experimental_sharding:
+
+        @wraps(f)
+        def _f(self, x):
+            concrete_or_error(None, x, NumbaOperatorGetConnDuringTracingError, f)
+
+            if isinstance(x, jax.Array) and len(x.devices()) > 1:  # sharded
+                xp_mels_np = []
+                n_conn_dev = []
+                for s in x.addressable_shards:
+                    xp, mels = f(self, s.data)
+                    xp_mels_np.append((xp, mels))
+                    n_conn_dev.append(
+                        jax.device_put(
+                            np.array(
+                                [
+                                    mels.shape[-1],
+                                ]
+                            ),
+                            s.device,
+                        )
+                    )
+                # numba might pad every x differently, so here we pad all to the common max over devices and all processes
+                n_conn = jax.make_array_from_single_device_arrays(
+                    (len(x.devices()),),
+                    jax.sharding.PositionalSharding(list(x.devices())),
+                    n_conn_dev,
+                )
+                n_conn_max = int(jax.jit(lambda x: x.max())(n_conn))
+                xp_dev = []
+                mels_dev = []
+                for (xp, mels), s in zip(xp_mels_np, x.addressable_shards):
+                    npad = n_conn_max - mels.shape[-1]
+                    if npad > 0:
+                        mels = np.pad(
+                            mels, pad_width=((0, 0),) * (mels.ndim - 1) + ((0, npad),)
+                        )
+                        xp = np.pad(
+                            xp,
+                            pad_width=((0, 0),) * (mels.ndim - 1)
+                            + ((0, npad),)
+                            + ((0, 0),),
+                        )
+                        xp[..., -npad:, :] = xp[..., :1, :]
+                    xp_dev.append(jax.device_put(xp, s.device))
+                    mels_dev.append(jax.device_put(mels, s.device))
+                shape = x.shape[:-1] + (n_conn_max,)
+                xp = jax.make_array_from_single_device_arrays(
+                    shape + x.shape[-1:],
+                    x.sharding.reshape(
+                        x.sharding.shape[:-1] + (1,) + x.sharding.shape[-1:]
+                    ),
+                    xp_dev,
+                )
+                mels = jax.make_array_from_single_device_arrays(
+                    shape, x.sharding, mels_dev
+                )
+                return xp, mels
+            elif isinstance(x, jax.Array):  # and len(x.devices()) == 1; single device
+                return jax.device_put(f(self, x), device=x.device())
+            else:
+                return f(self, x)
+
+        return _f
+    else:
+        return f
+
+
+
 
 _identity = lambda x: x
 
@@ -86,9 +223,9 @@ def extract_replicated(t):
     """
 
     def _extract_replicated(x):
-        if isinstance(x, jax.Array) and not x.is_fully_addressable:
+        if isinstance(x, jax.Array):
             assert x.is_fully_replicated
-            return x.addressable_data(0)
+            return np.asarray(x.addressable_data(0))
         else:
             return x
 

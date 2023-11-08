@@ -502,7 +502,7 @@ def test_local_estimators(vstate, operator):
 
     def inner_test():
         oloc = vstate.local_estimators(operator)
-        assert oloc.shape == (vstate.sampler.n_chains, vstate.n_samples)
+        assert oloc.shape == (vstate.sampler.n_chains, vstate._chain_length)
 
         stats1 = nk.stats.statistics(oloc)
         stats2 = vstate.expect(operator)
