@@ -18,12 +18,14 @@ def replicate_sharding(f):
     Args:
         f: a python get_conn_padded (which takes self, x and maps it to (xp,mels))
     """
-    def _f(*args, **kwargs):
-        raise NotImplementedError(
+    if config.netket_experimental_sharding:
+        def _f(*args, **kwargs):
+            raise NotImplementedError(
             "Numba operators are not yet supported with netket_experimental_sharding. Please rewrite your operator in jax."
-        )
-    return _f
-
+            )
+        return _f
+    else:
+        return f
 
 _identity = lambda x: x
 
