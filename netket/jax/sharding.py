@@ -9,89 +9,45 @@ from jax.sharding import Mesh, PartitionSpec as P
 from jax.experimental.shard_map import shard_map
 
 from netket.utils import config
-from netket.errors import concrete_or_error, NumbaOperatorGetConnDuringTracingError
 
 
-def replicate_sharding(f):
+@partial(jax.jit, static_argnums=0)
+def _replicate_shmap_callback(f, x):
+    mesh = Mesh(jax.devices(), axis_names=("i"))
+
+    @partial(shard_map, mesh=mesh, in_specs=(P("i")), out_specs=P("i"))
+    def _f(x):
+        # here we infer the output shape by doing eval_shape by hand
+        # TODO better way?
+        dummy_x = np.zeros((1,) * (x.ndim - 1) + x.shape[-1:], x.dtype)
+        dummy_xp, dummy_mels = f(dummy_x)
+        xp_shape = jax.ShapeDtypeStruct(
+            x.shape[:-1] + dummy_xp.shape[x.ndim - 1 :], dummy_xp.dtype
+        )
+        mels_shape = jax.ShapeDtypeStruct(
+            x.shape[:-1] + dummy_mels.shape[x.ndim - 1 :], dummy_mels.dtype
+        )
+        result_shape = (xp_shape, mels_shape)
+        return jax.pure_callback(f, result_shape, x, vectorized=True)
+
+    return _f(x)
+
+
+def replicate_sharding_shmap(f):
     """
     Wrapper for python get_conn_padded to make it work with shared/global device arrays.
     Calls f on every shard, and puts the results back on the devices with the correct sharding.
     The input to f is assumed to have PositionalSharding (or equivalent) along a single batch axis.
 
-    The resulting function cannot be used inside of jit.
+    version which uses pure_callback and jax.experimental.shard_map internally
 
     Args:
         f: a python get_conn_padded (which takes self, x and maps it to (xp,mels))
     """
-    # ideally I would like to use a simple shard map with callback, however
-    # for that we need to know the shape a priori which would require an extra n_conn call.
+    return lambda self, x: _replicate_shmap_callback(partial(f, self), x)
 
-    if config.netket_experimental_sharding:
 
-        @wraps(f)
-        def _f(self, x):
-            concrete_or_error(None, x, NumbaOperatorGetConnDuringTracingError, f)
-
-            if isinstance(x, jax.Array) and len(x.devices()) > 1:  # sharded
-                xp_mels_np = []
-                n_conn_dev = []
-                for s in x.addressable_shards:
-                    xp, mels = f(self, s.data)
-                    xp_mels_np.append((xp, mels))
-                    n_conn_dev.append(
-                        jax.device_put(
-                            np.array(
-                                [
-                                    mels.shape[-1],
-                                ]
-                            ),
-                            s.device,
-                        )
-                    )
-                # numba might pad every x differently, so here we pad all to the common max over devices and all processes
-                n_conn = jax.make_array_from_single_device_arrays(
-                    (len(x.devices()),),
-                    jax.sharding.PositionalSharding(list(x.devices())),
-                    n_conn_dev,
-                )
-                n_conn_max = int(jax.jit(lambda x: x.max())(n_conn))
-                xp_dev = []
-                mels_dev = []
-                for (xp, mels), s in zip(xp_mels_np, x.addressable_shards):
-                    npad = n_conn_max - mels.shape[-1]
-                    if npad > 0:
-                        mels = np.pad(
-                            mels, pad_width=((0, 0),) * (mels.ndim - 1) + ((0, npad),)
-                        )
-                        xp = np.pad(
-                            xp,
-                            pad_width=((0, 0),) * (mels.ndim - 1)
-                            + ((0, npad),)
-                            + ((0, 0),),
-                        )
-                        xp[..., -npad:, :] = xp[..., :1, :]
-                    xp_dev.append(jax.device_put(xp, s.device))
-                    mels_dev.append(jax.device_put(mels, s.device))
-                shape = x.shape[:-1] + (n_conn_max,)
-                xp = jax.make_array_from_single_device_arrays(
-                    shape + x.shape[-1:],
-                    x.sharding.reshape(
-                        x.sharding.shape[:-1] + (1,) + x.sharding.shape[-1:]
-                    ),
-                    xp_dev,
-                )
-                mels = jax.make_array_from_single_device_arrays(
-                    shape, x.sharding, mels_dev
-                )
-                return xp, mels
-            elif isinstance(x, jax.Array):  # and len(x.devices()) == 1; single device
-                return jax.device_put(f(self, x), device=x.device())
-            else:
-                return f(self, x)
-
-        return _f
-    else:
-        return f
+replicate_sharding = replicate_sharding_shmap
 
 
 _identity = lambda x: x
