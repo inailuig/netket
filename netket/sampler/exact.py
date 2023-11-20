@@ -102,7 +102,7 @@ class ExactSampler(Sampler):
         # we call into python only once.
         new_rng, rng = jax.random.split(state.rng)
         with jax.ensure_compile_time_eval():
-            alst = sampler.hilbert.all_states()
+            alst = sampler.hilbert.all_states().astype(sampler.dtype)
         samples = jax.random.choice(
             rng,
             alst,
