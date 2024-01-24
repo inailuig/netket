@@ -38,10 +38,7 @@ from netket.jax.sharding import sharding_decorator
 # jitted; the arguments of mat_vec are outputs of jax.linearize, which are pytrees
 
 
-def _mat_vec(jvp_fn, v, diag_shift, pdf=None):
-    # Save linearisation work
-    # TODO move to mat_vec_factory after jax v0.2.19
-    vjp_fn = jax.linear_transpose(jvp_fn, v)
+def _mat_vec(jvp_fn, vjp_fn, v, diag_shift, pdf=None):
 
     w = jvp_fn(v)
     if pdf is None:
@@ -83,7 +80,8 @@ def mat_vec_factory(forward_fn, params, model_state, samples, pdf=None):
         return forward_fn({"params": W, **model_state}, samples)
 
     _, jvp_fn = jax.linearize(fun, params)
-    return Partial(_mat_vec, jvp_fn, pdf=pdf)
+    vjp_fn = jax.linear_transpose(jvp_fn, params)
+    return Partial(_mat_vec, jvp_fn, vjp_fn, pdf=pdf)
 
 
 # -------------------------------------------------------------------------------
