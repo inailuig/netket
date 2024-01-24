@@ -49,7 +49,7 @@ def _mat_vec(jvp_fn, v, diag_shift, pdf=None):
         w = w * (1.0 / (w.size * mpi.n_nodes))
         w = subtract_mean(w)  # w/ MPI
     else:
-        w = pdf * (w - mpi.mpi_sum_jax(pdf @ w)[0])
+        w = pdf * (w - mpi.mpi_sum_jax((pdf * w).sum())[0])
     # Oᴴw = (wᴴO)ᴴ = (w* O)* since 1D arrays are not transposed
     # vjp_fn packages output into a length-1 tuple
     (res,) = tree_conj(vjp_fn(w.conjugate()))
@@ -135,7 +135,7 @@ def _Odagger_DeltaO_v(forward_fn, params, samples, v, chunk_size, pdf=None):
         w = w * (1.0 / (samples.shape[0] * mpi.n_nodes))
         w = subtract_mean(w)  # w/ MPI
     else:
-        w = pdf * (w - mpi.mpi_sum_jax(pdf @ w)[0])
+        w = pdf * (w - mpi.mpi_sum_jax((pdf * w).sum())[0])
     res = _OH_w(forward_fn, params, samples, w, chunk_size)
     return jax.tree_map(lambda x: mpi.mpi_sum_jax(x)[0], res)  # MPI
 

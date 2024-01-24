@@ -380,6 +380,6 @@ def _multiply_by_pdf(oks, pdf):
     """
 
     return jax.tree_map(
-        lambda x: jax.lax.broadcast_in_dim(pdf, x.shape, (0,)) * x,
+        lambda x: jax.lax.broadcast_in_dim(jnp.atleast_1d(pdf), x.shape, (0,)) * x,
         oks,
     )
