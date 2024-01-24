@@ -14,13 +14,11 @@
 
 from typing import Optional
 from functools import partial
-import math
 
 import jax
 import jax.numpy as jnp
 from jax.tree_util import Partial
 
-from netket.stats import subtract_mean, sum as sum_mpi
 from netket.utils import mpi
 from netket.utils.types import Array, Callable, PyTree
 from netket.jax import (
@@ -351,24 +349,16 @@ def jacobian(
     )(Partial(f), params, samples)
 
     if pdf is None:
-        if center:
-            jacobians = jax.tree_map(lambda x: subtract_mean(x, axis=0), jacobians)
+        pdf = 1.0 / samples.shape[0] * mpi.n_nodes
+    if center:
+        jacobians_avg = jax.tree_map(
+            lambda x: mpi.mpi_sum_jax(x.sum(axis=0))[0],
+            _multiply_by_pdf(jacobians, pdf),
+        )
+        jacobians = jax.tree_map(lambda x, y: x - y, jacobians, jacobians_avg)
 
-        if _sqrt_rescale:
-            sqrt_n_samp = math.sqrt(
-                samples.shape[0] * mpi.n_nodes
-            )  # maintain weak type
-            jacobians = jax.tree_map(lambda x: x / sqrt_n_samp, jacobians)
-
-    else:
-        if center:
-            jacobians_avg = jax.tree_map(
-                partial(sum_mpi, axis=0), _multiply_by_pdf(jacobians, pdf)
-            )
-            jacobians = jax.tree_map(lambda x, y: x - y, jacobians, jacobians_avg)
-
-        if _sqrt_rescale:
-            jacobians = _multiply_by_pdf(jacobians, jnp.sqrt(pdf))
+    if _sqrt_rescale:
+        jacobians = _multiply_by_pdf(jacobians, jnp.sqrt(pdf))
 
     return jacobians
 
