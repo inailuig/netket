@@ -18,6 +18,7 @@ import numpy as np
 import jax
 
 from .types import Array, DType, Shape
+from . import struct
 
 
 class HashableArray:
@@ -103,6 +104,32 @@ class HashableArray:
         return (
             f"HashableArray(shape={self.shape}, dtype={self.dtype}, hash={hash(self)})"
         )
+
+
+class StaticArray(struct.Pytree):
+    wrapped: HashableArray = struct.field(pytree_node=False)
+
+    def __init__(self, wrapped):
+        self.wrapped = HashableArray(wrapped)
+
+    def __array__(self, dtype: DType = None):
+        return self.wrapped.__array__(dtype)
+
+    @property
+    def dtype(self) -> DType:
+        return self.wrapped.dtype
+
+    @property
+    def size(self) -> int:
+        return self.wrapped.size
+
+    @property
+    def ndim(self) -> int:
+        return self.wrapped.ndim
+
+    @property
+    def shape(self) -> Shape:
+        return self.wrapped.shape
 
 
 def array_in(x, ys):
