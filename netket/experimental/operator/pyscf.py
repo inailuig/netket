@@ -23,6 +23,10 @@ from netket.operator import DiscreteOperator
 from netket.experimental.hilbert import SpinOrbitalFermions
 from netket.utils.optional_deps import import_optional_dependency
 from ._fermion_operator_2nd_numba import FermionOperator2nd
+from ._fermion_operator_2nd_jax import FermionOperator2ndJax
+from ._particle_number_conserving_fermionic import (
+    ParticleNumberConservingFermioperator2ndJax,
+)
 
 
 def compute_pyscf_integrals(mol, mo_coeff):
@@ -296,7 +300,8 @@ def from_pyscf_molecule(
     mo_coeff: Optional[np.ndarray] = None,
     *,
     cutoff: float = 1e-11,
-    implementation: DiscreteOperator = FermionOperator2nd,
+    implementation: DiscreteOperator = ParticleNumberConservingFermioperator2ndJax,
+    **kwargs,
 ) -> DiscreteOperator:
     r"""
     Construct a netket operator encoding the electronic hamiltonian of a pyscf
@@ -353,8 +358,8 @@ def from_pyscf_molecule(
         cutoff: Ignores all matrix elements in the `V` and `T` matrix that have
             magnitude less than this value. Defaults to :math:`10^{-11}`
         implementation: The particular implementation to use for the operator.
-            Different fermionic operator implementation might have different
-            performances. Defaults to
+            Different fermionic operator implementations might have different
+            performance. Defaults to
             :class:`netket.experimental.operator.FermionOperator2nd` (this might
             change in the future).
 
@@ -370,13 +375,23 @@ def from_pyscf_molecule(
 
     E_nuc, Tij, Vijkl = TV_from_pyscf_molecule(molecule, mo_coeff, cutoff=cutoff)
 
-    ha = operator_from_arrays(
-        E_nuc,
-        Tij,
-        0.5 * Vijkl,
-        molecule.nelec,
-        term_conj4=(1, 1, 0, 0),
-        cls=implementation,
-    )
-    # TODO maybe run setup and set _max_conn_size here estimating it analytially
+    # todo add some kind of implementation registry
+    if implementation in [FermionOperator2nd, FermionOperator2ndJax]:
+        ha = operator_from_arrays(
+            E_nuc,
+            Tij,
+            0.5 * Vijkl,
+            molecule.nelec,
+            term_conj4=(1, 1, 0, 0),
+            cls=implementation,
+        )
+        # TODO maybe run setup and set _max_conn_size here estimating it analytially
+    elif implementation is ParticleNumberConservingFermioperator2ndJax:
+        hi = SpinOrbitalFermions(
+            n_orbitals=int(molecule.nao), s=1 / 2, n_fermions_per_spin=molecule.nelec
+        )
+        # TV_from_pyscf_molecule computes the arrays in normal order
+        ha = implementation.from_sparse_arrays_normal_order(
+            hi, [E_nuc, Tij, 0.5 * Vijkl], **kwargs
+        )
     return ha
