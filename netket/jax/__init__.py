@@ -61,6 +61,7 @@ from ._jacobian import jacobian, jacobian_default_mode
 from ._sort import sort, searchsorted
 
 from ._expect import expect
+from ._sparse import COOTensor
 
 # internal sharding utilities
 from . import sharding
