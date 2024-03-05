@@ -93,19 +93,8 @@ def QGTOnTheFly(
         mv_factory = partial(mat_vec_chunked_factory, chunk_size=chunk_size)
         chunking = True
 
-    # check if holomorphic or not
-    if holomorphic:
-        if nkjax.tree_leaf_isreal(vstate.parameters):
-            raise IllegalHolomorphicDeclarationForRealParametersError()
-        else:
-            mode = "holomorphic"
-    else:
-        if not nkjax.tree_leaf_iscomplex(vstate.parameters):
-            mode = "real"
-        else:
-            if holomorphic is None:
-                warnings.warn(HolomorphicUndeclaredWarning(), UserWarning)
-            mode = "complex"
+    if holomorphic and nkjax.tree_leaf_isreal(vstate.parameters):
+        raise IllegalHolomorphicDeclarationForRealParametersError()
 
     nkjax.jacobian_default_mode(
         vstate._apply_fun,
@@ -126,7 +115,7 @@ def QGTOnTheFly(
         _mat_vec=mat_vec,
         _params=vstate.parameters,
         _chunking=chunking,
-        _mode=mode,
+        _holomorphic=holomorphic,
         **kwargs,
     )
 
@@ -155,15 +144,8 @@ class QGTOnTheFlyT(LinearOperator):
     _chunking: bool = struct.field(pytree_node=False, default=False)
     """Whether the implementation with chunks is used which currently does not support vmapping over it"""
 
-    _mode: str = struct.field(pytree_node=False, default=None)
-    """Differentiation mode:
-        - "real": for real-valued R->R and C->R Ansätze, splits the complex inputs
-                  into real and imaginary part.
-        - "complex": for complex-valued R->C and C->C Ansätze, splits the complex
-                  inputs and outputs into real and imaginary part
-        - "holomorphic": for any Ansätze. Does not split complex values.
-        - "auto": autoselect real or complex.
-    """
+    _holomorphic: bool = struct.field(pytree_node=False, default=None)
+    """Whether the Ansatz is holomorphic. Only needed when to_dense is called."""
 
     def __matmul__(self, y):
         return onthefly_mat_treevec(self, y)
@@ -185,9 +167,12 @@ class QGTOnTheFlyT(LinearOperator):
         #
         # We must check this because the AD implementation will compute the wrong
         # QGT in that case
-        if self._mode == "complex":
-            raise NonHolomorphicQGTOnTheFlyDenseRepresentationError()
 
+        if nkjax.tree_leaf_iscomplex(vstate.parameters):
+            if self._holomorphic is None:
+                warnings.warn(HolomorphicUndeclaredWarning(), UserWarning)
+            elif not self._holomorphic:
+                raise NonHolomorphicQGTOnTheFlyDenseRepresentationError()
         return _to_dense(self)
 
     def __repr__(self):
