@@ -17,14 +17,13 @@ from typing import Optional, TYPE_CHECKING
 
 import jax
 from jax import numpy as jnp
-from jax.tree_util import register_pytree_node_class
 
 from netket.graph import AbstractGraph
-from netket.hilbert import AbstractHilbert
+from netket.hilbert import DiscreteHilbert
 from netket.utils.numbers import StaticZero
-from netket.utils.types import DType
+from netket.utils.types import DType, Array
 
-from .._discrete_operator_jax import DiscreteJaxOperator
+from .._discrete_operator_jax import DiscreteJaxOperatorPytree
 
 from .base import IsingBase
 
@@ -32,16 +31,18 @@ if TYPE_CHECKING:
     from .numba import Ising
 
 
-@register_pytree_node_class
-class IsingJax(IsingBase, DiscreteJaxOperator):
+class IsingJax(IsingBase, DiscreteJaxOperatorPytree):
     """
     Jax-compatible version of :class:`netket.operator.Ising`.
     """
+    _edges: Array
+    _h: Array
+    _J: Array
 
     @wraps(IsingBase.__init__)
     def __init__(
         self,
-        hilbert: AbstractHilbert,
+        hilbert: DiscreteHilbert,
         graph: AbstractGraph,
         h: float,
         J: float = 1.0,
@@ -62,7 +63,10 @@ class IsingJax(IsingBase, DiscreteJaxOperator):
         super().__init__(hilbert, graph=graph, h=h, J=J, dtype=dtype)
 
         self._edges = jnp.asarray(self.edges, dtype=jnp.int32)
-        self._hi_local_states = tuple(self.hilbert.local_states)
+
+    @property
+    def _hi_local_states(self):
+        return tuple(self.hilbert.local_states)
 
     @jax.jit
     @wraps(IsingBase.n_conn)
@@ -91,22 +95,6 @@ class IsingJax(IsingBase, DiscreteJaxOperator):
         ha = super().to_local_operator()
 
         return ha.to_jax_operator()
-
-    def tree_flatten(self):
-        data = (self.h, self.J, self.edges)
-        metadata = {"hilbert": self.hilbert}
-        return data, metadata
-
-    @classmethod
-    def tree_unflatten(cls, metadata, data):
-        h, J, edges = data
-        hi = metadata["hilbert"]
-
-        res = cls(hi, h=1.0, graph=[(0, 0)])
-        res._h = h
-        res._J = J
-        res._edges = edges
-        return res
 
 
 def _ising_mels_jax(x, edges, h, J):
