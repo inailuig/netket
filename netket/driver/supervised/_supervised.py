@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from functools import partial
+from functools import partial, wraps
 
 import jax
 import jax.numpy as jnp
@@ -24,59 +24,14 @@ from netket.optimizer import (
     identity_preconditioner,
     PreconditionerT,
 )
+from netket.utils.types import PyTree, Optimizer
+
 
 from .abstract_variational_driver import AbstractVariationalDriver
 
 
-# A general loss function takes the model apply function (logpsi),
-# its variables as well as the training dataset of training configurations
-# x_train and log-amplitudes logy_train.
-# To simplify writing simple losses which only take the output at the
-# training samples and the training targets we provide the following decorator.
-
-
-def simple_loss(loss):
-    def _loss(apply_fn, variables, x_train, logy_train, **kwargs):
-        logy = apply_fn(variables, x_train)
-        s = statistics(loss(logy, logy_train, **kwargs))
-        return s
-
-    return _loss
-
-
-### Example Loss functions
-
-
-@simple_loss
-def loss_mse_log(logpsi, logtarget):
-    # 0.5 * (log(psi) - log(target)) * (log(psi) - log(target)).conj()
-    dy = logpsi - logtarget
-    res = 0.5 * dy * dy.conj()
-    return res.real
-
-
-def loss_log_overlap(apply_fn, variables, x_train, logy_train):
-    value = apply_fn(variables, x_train)
-    t = jnp.exp(logy_train)
-
-    value = jnp.exp(value - value.real.max())
-    t = jnp.exp(t - t.real.max())
-
-    num1 = (value.conj() * t).sum()
-    num2 = (value * t.conj()).sum()
-    num3 = (value * value.conj()).sum()
-    num4 = (t * t.conj()).sum()
-    complex_log_overlap = -(
-        jnp.log(num1) + jnp.log(num2) - jnp.log(num3) - jnp.log(num4)
-    )
-    return complex_log_overlap.real
-
-
-### Supervised driver implementation
-
-
 @partial(jax.jit, static_argnames=("N", "unique", "log", "uniform"), inline=True)
-def get_samples_jax(rng_key, X, Y, N, *, unique=False, uniform=False, log=True):
+def _get_samples_jax(rng_key, X, Y, N, *, unique=False, uniform=False, log=True):
     if uniform:
         i = jax.random.randint(rng_key, (N,), 0, len(X))
     else:
@@ -92,7 +47,7 @@ def get_samples_jax(rng_key, X, Y, N, *, unique=False, uniform=False, log=True):
 
 
 @partial(jax.jit, static_argnames=("loss", "apply_fun"), inline=True)
-def loss_value_and_grad(loss, apply_fun, params, model_state, x_train, y_train):
+def _loss_value_and_grad(loss, apply_fun, params, model_state, x_train, y_train):
     def _loss(p):
         l = loss(apply_fun, {"params": p, **model_state}, x_train, y_train)
         if isinstance(l, Stats):
@@ -104,6 +59,22 @@ def loss_value_and_grad(loss, apply_fun, params, model_state, x_train, y_train):
     return val, tree_conj(grad)
 
 
+sa = ExactSampler()
+
+def _prepare_target_state(samples, targets, batch_size, uniform=False):
+    if batch_size is None:
+        raise ValueError('batch_size is required')
+    hi = LookupTableHilbert(samples)
+    #samples_sorted = hi.all_states()
+    targets_sorted = samples[jnp.argsort(hi.states_to_numbers(samples))]
+    if uniform:
+        
+    else:
+        sa = nk.sampler.ExactSampler(hi)
+    ma = nk.models.LogStateVector(hi)
+    var = {'params': {'logstate': targets_sorted}}
+    return  MCState(sa, ma, variables=var, n_samples=batch_size)
+
 class Supervised(AbstractVariationalDriver):
     """
     Supervised learning scheme to learn data.
@@ -111,16 +82,17 @@ class Supervised(AbstractVariationalDriver):
 
     def __init__(
         self,
-        variational_state,
-        loss,
-        samples,
-        targets,
-        batch_size,
-        rng_key,
-        optimizer,
+        variational_state : MCState,
+        loss : Callable,
+        optimizer : Optimizer,
+        samples: Array = None,
+        targets : Array = None,
+        batch_size : int = None,
         *args,
         preconditioner: PreconditionerT = identity_preconditioner,
+        target_state : MCState = None,
         sample_uniform: bool = False,
+        seed: Optional[SeedT] = None,
         **kwargs,
     ):
         """
@@ -143,6 +115,10 @@ class Supervised(AbstractVariationalDriver):
         # TODO deduct name from the loss function or allow to specify custom one?
         super().__init__(variational_state, optimizer, minimized_quantity_name="Loss")
 
+        if target_state is None:
+            target_state = _prepare_target_state(samples, targets)
+
+
         self.preconditioner = preconditioner
 
         self._dp = None
@@ -164,7 +140,7 @@ class Supervised(AbstractVariationalDriver):
         """
 
         k, self._rng_key = jax.random.split(self._rng_key)
-        x_train, logy_train = get_samples_jax(
+        x_train, logy_train = _get_samples_jax(
             k,
             self._samples,
             self._targets,
@@ -173,7 +149,7 @@ class Supervised(AbstractVariationalDriver):
             log=True,
         )
 
-        self._loss_stats, self._loss_grad = loss_value_and_grad(
+        self._loss_stats, self._loss_grad = _loss_value_and_grad(
             self._loss_fn,
             self.state._apply_fun,
             self.state.parameters,

@@ -12,24 +12,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .abstract_hilbert import AbstractHilbert
-from .discrete_hilbert import DiscreteHilbert
-from .homogeneous import HomogeneousHilbert
-
-from .continuous_hilbert import ContinuousHilbert
-
-from .custom_hilbert import CustomHilbert
-from .doubled_hilbert import DoubledHilbert
-from .spin import Spin
-from .fock import Fock
-from .qubit import Qubit
-from .particle import Particle
-
-from .lookup_table import LookupTableHilbert
-
-from .tensor_hilbert import TensorHilbert
-from . import tensor_hilbert_discrete
-
-from netket.utils import _hide_submodules
-
-_hide_submodules(__name__)
+from ._supervised import Supervised
+from ._loss import loss_mse_log, loss_log_overlap, simple_loss
