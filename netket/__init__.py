@@ -57,3 +57,4 @@ from . import (
 # Main applications
 from .driver import VMC
 from .driver import SteadyState
+from .driver import Supervised
