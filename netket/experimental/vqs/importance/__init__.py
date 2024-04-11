@@ -1,3 +1,3 @@
 from .state import MCStateImportance
 from . import grad as _grad
-from .qgt import QGTOnTheFlyImportance
+from .qgt import importance_weight_normalized
