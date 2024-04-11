@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 from jax.tree_util import Partial
 import netket as nk
-from netket.experimental.vqs.importance import MCStateImportance, QGTOnTheFlyImportance
+from netket.experimental.vqs.importance import MCStateImportance
 from netket.utils import HashablePartial
 
 L = 8
@@ -11,7 +11,7 @@ ha = nk.operator.Ising(hilbert=hi, graph=g, h=1.0)
 ma = nk.models.RBM(alpha=1, use_visible_bias=False, param_dtype=float)
 sa = nk.sampler.ExactSampler(hi)
 op = nk.optimizer.Sgd(learning_rate=0.1)
-sr = nk.optimizer.SR(diag_shift=0.1)
+sr = nk.optimizer.SR(diag_shift=0.1, qgt=nk.optimizer.qgt.QGTJacobianPyTree())
 vs = nk.vqs.MCState(sa, ma, n_samples=32 * 1024)
 p0 = vs.parameters
 gs = nk.VMC(ha, op, variational_state=vs, preconditioner=sr)
@@ -42,15 +42,10 @@ class MCStateImportanceTest(MCStateImportance):
 
 l2 = nk.logging.RuntimeLog()
 
-sr_importance = nk.optimizer.SR(diag_shift=0.1, qgt=QGTOnTheFlyImportance())
-
 sa_importance = nk.sampler.ExactSampler(hi, machine_pow=1)
 vs_importance = MCStateImportanceTest(sa_importance, ma, n_samples=32 * 1024)
 vs_importance.parameters = p0
-gs_importance = nk.VMC(
-    ha, op, variational_state=vs_importance, preconditioner=sr_importance
-)
-
+gs_importance = nk.VMC(ha, op, variational_state=vs_importance, preconditioner=sr)
 
 gs_importance.run(100, out=l2)
 

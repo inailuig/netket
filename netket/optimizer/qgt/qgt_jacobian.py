@@ -184,10 +184,19 @@ def QGTJacobianDense(
 
     # TODO: Find a better way to handle this case
     from netket.vqs import FullSumState
+    from netket.experimental.vqs.importance import MCStateImportance
+    from netket.experimental.vqs.importance.qgt import importance_weight_normalized
 
     if isinstance(vstate, FullSumState):
         samples = split_array_mpi(vstate._all_states)
         pdf = split_array_mpi(vstate.probability_distribution())
+    elif isinstance(vstate, MCStateImportance):
+        samples = vstate.samples  # samples from q
+        pdf = importance_weight_normalized(vstate.log_w_fun, vstate.samples)
+        # when using the pdf the old qgt code
+        # does not expect a batch dim, so we flatten here
+        samples = samples.reshape(-1, samples.shape[-1])
+        pdf = pdf.ravel()
     else:
         samples = vstate.samples
         pdf = None
@@ -267,10 +276,19 @@ def QGTJacobianPyTree(
 
     # TODO: Find a better way to handle this case
     from netket.vqs import FullSumState
+    from netket.experimental.vqs.importance import MCStateImportance
+    from netket.experimental.vqs.importance.qgt import importance_weight_normalized
 
     if isinstance(vstate, FullSumState):
         samples = split_array_mpi(vstate._all_states)
         pdf = split_array_mpi(vstate.probability_distribution())
+    elif isinstance(vstate, MCStateImportance):
+        samples = vstate.samples  # samples from q
+        pdf = importance_weight_normalized(vstate.log_w_fun, vstate.samples)
+        # when using the pdf the old qgt code
+        # does not expect a batch dim, so we flatten here
+        samples = samples.reshape(-1, samples.shape[-1])
+        pdf = pdf.ravel()
     else:
         samples = vstate.samples
         pdf = None
