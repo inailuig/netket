@@ -1,29 +1,28 @@
 import netket as nk
 import jax
-import jax.numpy as jnp
 
-from .grad import expect_and_grad
 from jax.tree_util import Partial
 
-from .utils import logsumexp2
+from netket.sampler import Sampler
 
-from netket.vqs.mc.mc_state.state import compute_chain_length
-from netket.vqs.mc.common import force_to_grad as _force_to_grad
 
-#@jax.jit
+# @jax.jit
 def fake_model(variables, x):
     logpsi = variables["logpsi"]
     return logpsi(x)
+
 
 @jax.jit
 def default_logp_fun(logpsi_fn, machine_pow, x):
     # p = |Psi|^machine_pow
     return machine_pow * logpsi_fn(x).real
 
+
 @jax.jit
 def default_logw_fun(logq_fun, logp_fn, x):
     # w = p/q
     return logp_fn(x) - logq_fun(x)
+
 
 @jax.jit
 def default_logq_fun(logw_fun, logp_fn, x):
@@ -32,12 +31,13 @@ def default_logq_fun(logw_fun, logp_fn, x):
 
 
 class MCStateImportance(nk.vqs.MCState):
-    def __init__(self, *args, machine_pow=2, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, sampler: Sampler, model=None, *, machine_pow=2, **kwargs):
         # machine pow of the model (used for p)
         self._machine_pow = machine_pow
         # make sure machine pow for q is 1
-        assert self.sampler.machine_pow == 1
+        if not sampler.machine_pow == 1:
+            raise ValueError
+        super().__init__(sampler, model, **kwargs)
 
     @property
     def log_p_fun(self):
@@ -65,27 +65,12 @@ class MCStateImportance(nk.vqs.MCState):
         logq_fn = self.log_q_fun
         return Partial(default_logw_fun, logq_fn, logp_fn)
 
-    # we override the model and variables which are the only quantities used for sampling
     @property
-    def model(self):
+    def _sampler_model(self):
         return fake_model
 
     @property
-    def variables(self):
+    def _sampler_variables(self):
         # params are not used but apparently we need to pass them for flax not to complain
         fake_var = {"logpsi": self.log_q_fun, "params": None}
         return fake_var
-
-    # fix users of self.variables 1/2
-    def log_value(self, x):
-        return jit_evaluate(self._apply_fun, self._variables, x)
-
-    # fix users of self.variables 2/2
-    def to_array(self, normalize=True):
-        return nn.to_array(
-            self.hilbert,
-            self._apply_fun,
-            self._variables,
-            normalize=normalize,
-            chunk_size=self.chunk_size,
-        )
