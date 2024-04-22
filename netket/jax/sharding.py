@@ -293,7 +293,7 @@ def gather(x):
     # return jax.jit(jax.lax.with_sharding_constraint, static_argnums=1)(x, out_shardings)
 
 
-def sharding_decorator(f, sharded_args_tree, reduction_op_tree=False):
+def sharding_decorator(f, sharded_args_tree, reduction_op_tree=False, **kwargs):
     """
     A decorator which wraps a function so that it is evaluated on every shard of the distributed arguments,
     and the output is either returned sharded, or can be reduced with a collective operation.
@@ -474,7 +474,7 @@ def sharding_decorator(f, sharded_args_tree, reduction_op_tree=False):
             in_specs = _sele2(sharded_args, P("i"), P())
             out_specs = out_treedef.unflatten(_sele2(reduction_op, P(), P("i")))
 
-            @partial(shard_map, mesh=mesh, in_specs=in_specs, out_specs=out_specs)
+            @partial(shard_map, mesh=mesh, in_specs=in_specs, out_specs=out_specs, **kwargs)
             def _f(*args):
                 # workaround for shard_map not supporting non-array args part 2/2
                 args = tuple(a() if c else a for a, c in zip(args, nonarray_args))
