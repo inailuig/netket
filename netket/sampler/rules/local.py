@@ -16,7 +16,6 @@ import jax
 
 
 from netket.hilbert.random import flip_state
-from netket.jax.sharding import with_samples_sharding_constraint
 
 from .base import MetropolisRule
 
@@ -45,7 +44,6 @@ class LocalRule(MetropolisRule):
         hilb = sampler.hilbert
 
         indxs = jax.random.randint(key1, shape=(n_chains,), minval=0, maxval=hilb.size)
-        indxs = with_samples_sharding_constraint(indxs)
         σp, _ = flip_state(hilb, key2, σ, indxs)
 
         return σp, None
