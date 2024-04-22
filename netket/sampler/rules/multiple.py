@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from typing import Any, Optional
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -21,13 +22,13 @@ from flax import linen as nn
 
 from netket import config
 from netket.utils.types import Array, PyTree, PRNGKeyT
+from netket.jax.sharding import sharding_decorator
 
 # Necessary for the type annotation to work
 if config.netket_sphinx_build:
     from netket import sampler
 
 from .base import MetropolisRule
-
 
 class MultipleRules(MetropolisRule):
     r"""A Metropolis sampling rule that can be used to pick a rule from a list of rules
@@ -131,8 +132,8 @@ class MultipleRules(MetropolisRule):
             p=self.probabilities,
         )
 
-        batch_select = jax.vmap(lambda σ, i: σ[i], in_axes=(1, 0), out_axes=0)
-        σp = batch_select(jnp.stack(σps), indices)
+        batch_select = sharding_decorator(jax.vmap(partial(jnp.take, axis=0)), (True, True))
+        σp = batch_select(jnp.stack(σps, axis=1), indices)
 
         # if not all log_prob_corr are 0, convert the Nones to 0s
         if any(x is not None for x in log_prob_corrs):
@@ -140,7 +141,8 @@ class MultipleRules(MetropolisRule):
                 [
                     x if x is not None else jnp.zeros((sampler.n_batches,))
                     for x in log_prob_corrs
-                ]
+                ],
+                axis=1,
             )
             log_prob_corr = batch_select(log_prob_corrs, indices)
         else:
