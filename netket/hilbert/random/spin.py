@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 from functools import partial
 
@@ -70,9 +71,7 @@ def flip_state_scalar(hilb: Spin, key, state, index):
 
 
 def _flipat_N2(key, x, i):
-    res = x.at[i].set(-x[i]), x[i]
-    return res
-
+    return jax.lax.select(i==jnp.arange(len(x)), -x, x), jnp.take(x, i)
 
 def _flipat_generic(key, x, i, s):
     n_states = int(2 * s + 1)
