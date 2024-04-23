@@ -30,6 +30,7 @@ if config.netket_sphinx_build:
 
 from .base import MetropolisRule
 
+
 class MultipleRules(MetropolisRule):
     r"""A Metropolis sampling rule that can be used to pick a rule from a list of rules
     with a given probability.
