@@ -28,6 +28,7 @@ from netket.jax.sharding import sharding_decorator
 from .base import LocalOperatorBase
 from .compile_helpers import pack_internals_jax
 
+from .._pauli_strings import PauliStringsJax
 from .._discrete_operator_jax import DiscreteJaxOperator
 
 
@@ -338,4 +339,10 @@ class LocalOperatorJax(LocalOperatorBase, DiscreteJaxOperator):
             self.constant,
             dtype=self.dtype,
             mel_cutoff=self.mel_cutoff,
+        )
+
+    def to_pauli_strings(self) -> "PauliStringsJax":  # noqa: F821
+        """Convert to PauliStrings object"""
+        return super().to_pauli_strings(
+            cls=PauliStringsJax,
         )
