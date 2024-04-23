@@ -132,7 +132,9 @@ class MultipleRules(MetropolisRule):
             p=self.probabilities,
         )
 
-        batch_select = sharding_decorator(jax.vmap(partial(jnp.take, axis=0)), (True, True))
+        batch_select = sharding_decorator(
+            jax.vmap(partial(jnp.take, axis=0)), (True, True)
+        )
         σp = batch_select(jnp.stack(σps, axis=1), indices)
 
         # if not all log_prob_corr are 0, convert the Nones to 0s
