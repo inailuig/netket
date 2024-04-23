@@ -441,6 +441,9 @@ def test_sampling_sharded_not_commuincating(
     sampler_state = sampler.init_state(ma, w, seed=SAMPLER_SEED)
     samples, sampler_state = sampler.sample(ma, w, state=sampler_state, chain_length=1)
 
+    if isinstance(sampler_state, nk.sampler._metropolis_numpy.MetropolisNumpySamplerState):
+        pytest.xfail("MetropolisNumpySamplerState is not jit compatible")
+
     sample_jit = jax.jit(
         sampler.sample, static_argnums=0, static_argnames="chain_length"
     )
@@ -453,7 +456,7 @@ def test_sampling_sharded_not_commuincating(
         "all-to-all",
         "reduce-scatter",
     ]:
-        for l in txt.split('\n'):
+        for l in txt.split("\n"):
             assert o not in l
 
 
