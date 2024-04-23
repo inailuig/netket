@@ -23,6 +23,7 @@ from netket import config
 from netket.hilbert import DiscreteHilbert
 from netket.nn import to_array
 from netket.utils.types import PyTree, SeedT, DType
+from netket.jax.sharding import sharding_decorator
 
 from .base import Sampler, SamplerState
 
@@ -118,16 +119,20 @@ class ExactSampler(Sampler):
         # For future investigators:
         # this will lead to a crash if numbers_to_state throws.
         # it throws if we feed it nans!
-        samples = jax.pure_callback(
-            lambda numbers: sampler.hilbert.numbers_to_states(numbers).astype(
-                sampler.dtype
-            ),
-            jax.ShapeDtypeStruct(
-                (sampler.n_batches, chain_length, sampler.hilbert.size),
-                sampler.dtype,
-            ),
-            numbers,
-        )
+        @partial(sharding_decorator, sharded_args_tree=True)
+        def _callback(numbers):
+            return jax.pure_callback(
+                lambda numbers: sampler.hilbert.numbers_to_states(numbers).astype(
+                    sampler.dtype
+                ),
+                jax.ShapeDtypeStruct(
+                    (numbers.shape[0], chain_length, sampler.hilbert.size),
+                    sampler.dtype,
+                ),
+                numbers,
+            )
+
+        samples = _callback(numbers)
         # samples = jnp.asarray(samples, dtype=sampler.dtype).reshape(
         #    sampler.n_batches, chain_length, sampler.hilbert.size
         # )
