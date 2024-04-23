@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import math
+from functools import partial
 
 import jax
 import jax.numpy as jnp
@@ -23,6 +24,7 @@ from numba import jit
 
 from netket.operator import AbstractOperator, DiscreteJaxOperator
 from netket.utils import struct
+from netket.jax.sharding import sharding_decorator, with_samples_sharding_constraint
 
 from .base import MetropolisRule
 
@@ -86,7 +88,7 @@ class HamiltonianRuleNumba(HamiltonianRuleBase):
         """
         log_prob_dtype = jax.dtypes.canonicalize_dtype(float)
 
-        def _transition(v, rand_vec):
+        def __transition(v, rand_vec):
             log_prob_corr = np.zeros((σ.shape[0],), dtype=log_prob_dtype)
             v_proposed = np.empty(σ.shape, dtype=σ.dtype)
 
@@ -100,22 +102,26 @@ class HamiltonianRuleNumba(HamiltonianRuleBase):
             log_prob_corr -= np.log(sections)
             return v_proposed, log_prob_corr
 
+        @partial(sharding_decorator, sharded_args_tree=(True, True))
+        def _transition(v, rand_vec):
+            return jax.pure_callback(
+                _transition,
+                (
+                    jax.core.ShapedArray(v.shape, v.dtype),
+                    jax.core.ShapedArray((v.shape[0],), log_prob_dtype),
+                ),
+                v,
+                rand_vec,
+            )
+
         # ideally we would pass the key to python/numba in _choose, initialise a
         # np.random.default_rng(key) and use it to generate random uniform integers.
         # However, numba dose not support np states, and reseeding it's MT1998 implementation
         # would be slow so we generate floats in the [0,1] range in jax and pass those
         # to python
         rand_vec = jax.random.uniform(key, shape=(σ.shape[0],))
-
-        σp, log_prob_correction = jax.pure_callback(
-            _transition,
-            (
-                jax.core.ShapedArray(σ.shape, σ.dtype),
-                jax.core.ShapedArray((σ.shape[0],), log_prob_dtype),
-            ),
-            σ,
-            rand_vec,
-        )
+        rand_vec = with_samples_sharding_constraint(rand_vec)
+        σp, log_prob_correction = _transition(σ, rand_vec)
 
         return σp, log_prob_correction
 
