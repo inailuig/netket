@@ -47,7 +47,6 @@ class MCStateImportance(nk.vqs.MCState):
     @property
     def log_q_fun(self):
         # implement / override this according to the prob you want to sample from
-        # self.variables are overridden, use self._variables instead if needed
         # you need to return a jax.tree_util.Partial
         raise NotImplementedError
 
