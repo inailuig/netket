@@ -140,6 +140,38 @@ def _comb(kl, n):
     c = list(itertools.combinations(np.arange(len(kl)), n))
     return kl[np.array(c, dtype=kl.dtype).T[::-1]]
 
+def _jw_kernel(k_destroy, l_create, x):
+    # destroy
+    xd = jax.vmap(lambda i: x.at[i].set(0))(k_destroy.T)
+    # create
+    xp = jax.vmap(jax.vmap(lambda x, i: x.at[i].set(1), in_axes=(None, 0)))(
+        xd, l_create
+    )
+
+    m = jnp.arange(x.shape[-1], dtype=k_destroy.dtype)
+
+    # we apply the destruction operators in descending order,
+    # the jordan-wigner sign of an operator does not depend on sites larger than it, therefore
+    # we can compute it all in terms of the initial state.
+    # (sum the axis is the one of the indices we destroy/create (size number of operators//2))
+    jw_mask_destroy = reduce_xor(k_destroy[..., None] > m, axes=0)
+
+    # same for when we create again, except then have to apply it to the state where we already destroyed
+    jw_mask_create = reduce_xor(l_create[..., None] > m, axes=2)
+
+    create_was_empty = jax.vmap(
+        jax.vmap(lambda x, i: ~x[i].any(), in_axes=(None, 0))
+    )(xd, l_create)
+
+    sgn_destroy = reduce_xor(jw_mask_destroy * x[None], axes=-1)
+    sgn_create = reduce_xor(jw_mask_create * xd[:, None], axes=-1)
+    sgn = sgn_create + sgn_destroy[:, None]
+    sgn = jax.lax.bitwise_and(sgn, jnp.ones_like(sgn)).astype(bool)
+    sign = 1 - 2 * sgn.astype(np.int8)
+
+    return xp, sign, create_was_empty
+
+
 @partial(jax.jit, static_argnums=0)
 @partial(jnp.vectorize, signature="(n)->(m,n),(m)", excluded=(0, 2, 3, 4))
 def _get_conn_padded(n_fermions, x, index_array, create_array, weight_array):
@@ -173,40 +205,12 @@ def _get_conn_padded(n_fermions, x, index_array, create_array, weight_array):
             sgn = (half_n_ops // 2) % 2
             sign = 1 - 2 * sgn
             mels = sign * weight.sum()[None]
-            return xp, mels
         else:
             ind = index_array[tuple(k_destroy)]
             weight = weight_array[ind]
             l_create = create_array[ind]
 
-            # destroy
-            xd = jax.vmap(lambda i: x.at[i].set(0))(k_destroy.T)
-            # create
-            xp = jax.vmap(jax.vmap(lambda x, i: x.at[i].set(1), in_axes=(None, 0)))(
-                xd, l_create
-            )
-
-            m = jnp.arange(x.shape[-1], dtype=l_occupied.dtype)
-
-            # we apply the destruction operators in descending order,
-            # the jordan-wigner sign of an operator does not depend on sites larger than it, therefore
-            # we can compute it all in terms of the initial state.
-            # (sum the axis is the one of the indices we destroy/create (size number of operators//2))
-            jw_mask_destroy = reduce_xor(k_destroy[..., None] > m, axes=0)
-
-            # same for when we create again, except then have to apply it to the state where we already destroyed
-            jw_mask_create = reduce_xor(l_create[..., None] > m, axes=2)
-
-            create_was_empty = jax.vmap(
-                jax.vmap(lambda x, i: ~x[i].any(), in_axes=(None, 0))
-            )(xd, l_create)
-
-            sgn_destroy = reduce_xor(jw_mask_destroy * x[None], axes=-1)
-            sgn_create = reduce_xor(jw_mask_create * xd[:, None], axes=-1)
-            sgn = sgn_create + sgn_destroy[:, None]
-            sgn = jax.lax.bitwise_and(sgn, jnp.ones_like(sgn)).astype(bool)
-            sign = 1 - 2 * sgn.astype(np.int8)
-
+            xp, sign, create_was_empty = _jw_kernel(k_destroy, l_create, x)
             mels = weight * sign * create_was_empty
 
             # make sure we don't return states w/ wrong number of electrons
