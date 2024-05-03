@@ -136,6 +136,10 @@ def split_diag_offdiag(sites, weights):
     return (diag_sites, diag_weights), (offdiag_sites, offdiag_weights)
 
 
+def _comb(kl, n):
+    c = list(itertools.combinations(np.arange(len(kl)), n))
+    return kl[np.array(c, dtype=kl.dtype).T[::-1]]
+
 @partial(jax.jit, static_argnums=0)
 @partial(jnp.vectorize, signature="(n)->(m,n),(m)", excluded=(0, 2, 3, 4))
 def _get_conn_padded(n_fermions, x, index_array, create_array, weight_array):
@@ -145,6 +149,7 @@ def _get_conn_padded(n_fermions, x, index_array, create_array, weight_array):
         half_n_ops = index_array.ndim
     else:  # diagonal
         half_n_ops = weight_array.ndim
+
     if half_n_ops == 0:  # constant
         xp = x[None, :]
         mels = weight_array.reshape(xp.shape[:-1])
@@ -152,14 +157,6 @@ def _get_conn_padded(n_fermions, x, index_array, create_array, weight_array):
         dtype = x.dtype
 
         (l_occupied,) = jnp.where(x, size=n_fermions)
-
-        def _comb(kl, n):
-            ind = np.array(
-                list(itertools.combinations(np.arange(len(kl)), n)),
-                dtype=l_occupied.dtype,
-            ).T[::-1]
-            return kl[ind]
-
         k_destroy = _comb(l_occupied, half_n_ops)
 
         if index_array is None:  # diagonal
