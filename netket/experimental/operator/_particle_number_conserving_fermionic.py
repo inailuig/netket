@@ -255,6 +255,51 @@ def _to_fermiop_helper(index_array, create_array, weight_array):
     return terms, weights
 
 
+def _sparse_arrays_to_coords_data_dict(operators):
+    ops = {}
+    for A in operators:
+        if isinstance(A, sparse.COO):
+            k = A.ndim
+            if A.shape == ():
+                A = k.fill_value
+            else:
+                assert A.fill_value == 0
+        # np.isscalar does not detect jax scalars so we use jnp here
+        elif jnp.isscalar(A):
+            k = 0
+        elif hasattr(A, "__array__"):
+            A = sparse.COO.from_numpy(np.asarray(A))
+            k = A.ndim
+        else:
+            raise NotImplementedError
+        Ak = ops.pop(k, None)
+        if Ak is not None:
+            ops[k] = Ak + A
+        else:
+            ops[k] = A
+    const = ops.pop(0, None)
+    coords_data_dict = {A.ndim: (A.coords.T, A.data) for A in ops.values()}
+    if const is not None:
+        coords_data_dict[0] = np.zeros((1, 0), dtype=int), np.array([const])
+    return coords_data_dict
+
+
+def _prepare_operator_data_from_coords_data_dict(
+    coords_data_dict, n_orbitals, **kwargs
+):
+    # n_fermions = hi.n_fermions
+    data_offdiag = {}
+    data_diag = {}
+    for k, v in coords_data_dict.items():
+        sw_diag, sw_offdiag = split_diag_offdiag(*v)
+        if len(sw_diag[-1]) > 0:
+            data_diag[k] = prepare_data_diagonal(*sw_diag, n_orbitals, **kwargs)
+        if len(sw_offdiag[-1]) > 0:
+            data_offdiag[k] = prepare_data(*sw_offdiag, n_orbitals, **kwargs)
+    data = data_diag, data_offdiag
+    return data
+
+
 @struct.dataclass
 class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
     _hilbert: SpinOrbitalFermions = struct.field(pytree_node=False)
@@ -303,45 +348,14 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
         assert isinstance(hilbert, SpinOrbitalFermions)
         assert hilbert.n_fermions is not None
         n_orbitals = hilbert.n_orbitals * hilbert.n_spin_subsectors
-        # n_fermions = hi.n_fermions
-        data_offdiag = {}
-        data_diag = {}
-        for k, v in coords_data_dict.items():
-            sw_diag, sw_offdiag = split_diag_offdiag(*v)
-            if len(sw_diag[-1]) > 0:
-                data_diag[k] = prepare_data_diagonal(*sw_diag, n_orbitals, **kwargs)
-            if len(sw_offdiag[-1]) > 0:
-                data_offdiag[k] = prepare_data(*sw_offdiag, n_orbitals, **kwargs)
-        data = data_diag, data_offdiag
+        data = _prepare_operator_data_from_coords_data_dict(
+            coords_data_dict, n_orbitals, **kwargs
+        )
         return cls(hilbert, data)
 
     @classmethod
     def from_sparse_arrays_normal_order(cls, hilbert, operators, **kwargs):
-        ops = {}
-        for A in operators:
-            if isinstance(A, sparse.COO):
-                k = A.ndim
-                if A.shape == ():
-                    A = k.fill_value
-                else:
-                    assert A.fill_value == 0
-            # np.isscalar does not detect jax scalars so we use jnp here
-            elif jnp.isscalar(A):
-                k = 0
-            elif hasattr(A, "__array__"):
-                A = sparse.COO.from_numpy(np.asarray(A))
-                k = A.ndim
-            else:
-                raise NotImplementedError
-            Ak = ops.pop(k, None)
-            if Ak is not None:
-                ops[k] = Ak + A
-            else:
-                ops[k] = A
-        const = ops.pop(0, None)
-        terms = {A.ndim: (A.coords.T, A.data) for A in ops.values()}
-        if const is not None:
-            terms[0] = np.zeros((1, 0), dtype=int), np.array([const])
+        terms = _sparse_arrays_to_coords_data_dict(operators)
         return cls.from_coords_data_normal_order(hilbert, terms, **kwargs)
 
     @classmethod
