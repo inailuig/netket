@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import abc
-from functools import lru_cache, wraps
+from functools import wraps
 
 import numpy as np
 from scipy import sparse
@@ -206,7 +206,7 @@ class DiscreteJaxOperator(DiscreteOperator):
             return res
         return BCSR.from_bcoo(res)
 
-    @lru_cache(5)
+    # @lru_cache(5)
     def to_sparse(self) -> JAXSparse:
         r"""Returns the sparse matrix representation of the operator. Note that,
         in general, the size of the matrix is exponential in the number of quantum
