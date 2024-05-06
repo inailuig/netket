@@ -3,6 +3,7 @@ import jax.numpy as jnp
 
 from .utils import logsumexp_mpi
 
+
 @jax.jit
 def importance_weight_normalized(log_w_fun, samples_q):
     samples_q = samples_q.reshape(-1, samples_q.shape[-1])
