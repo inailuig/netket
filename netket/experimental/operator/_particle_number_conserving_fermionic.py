@@ -140,6 +140,7 @@ def _comb(kl, n):
     c = list(itertools.combinations(np.arange(len(kl)), n))
     return kl[np.array(c, dtype=kl.dtype).T[::-1]]
 
+
 def _jw_kernel(k_destroy, l_create, x):
     # destroy
     xd = jax.vmap(lambda i: x.at[i].set(0))(k_destroy.T)
@@ -159,9 +160,9 @@ def _jw_kernel(k_destroy, l_create, x):
     # same for when we create again, except then have to apply it to the state where we already destroyed
     jw_mask_create = reduce_xor(l_create[..., None] > m, axes=2)
 
-    create_was_empty = jax.vmap(
-        jax.vmap(lambda x, i: ~x[i].any(), in_axes=(None, 0))
-    )(xd, l_create)
+    create_was_empty = jax.vmap(jax.vmap(lambda x, i: ~x[i].any(), in_axes=(None, 0)))(
+        xd, l_create
+    )
 
     sgn_destroy = reduce_xor(jw_mask_destroy * x[None], axes=-1)
     sgn_create = reduce_xor(jw_mask_create * xd[:, None], axes=-1)
