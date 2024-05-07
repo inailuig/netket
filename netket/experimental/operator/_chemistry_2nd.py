@@ -180,16 +180,16 @@ class Chemistry2ndJax(DiscreteJaxOperator):
     _operator_data: PyTree
 
     @property
-    def max_conn_size(self):
-        return NotImplemented
-
-    @property
     def dtype(self):
         return NotImplemented
 
     @property
     def is_hermitian(self):
-        return NotImplemented
+        return True
+
+    @property
+    def max_conn_size(self):
+        return jax.eval_shape(self.get_conn_padded, jnp.zeros(self._hilbert.size, dtype=jnp.int8))[1].shape[-1]
 
     def get_conn_padded(self, x):
         return get_conn_padded_pnc_spin(
