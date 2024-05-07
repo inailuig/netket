@@ -188,6 +188,7 @@ class Chemistry2ndJax(DiscreteJaxOperator):
         return True
 
     @property
+    @jax.jit
     def max_conn_size(self):
         return jax.eval_shape(self.get_conn_padded, jnp.zeros(self._hilbert.size, dtype=jnp.int8))[1].shape[-1]
 
