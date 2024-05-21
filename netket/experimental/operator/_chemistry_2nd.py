@@ -29,7 +29,7 @@ from .pyscf import compute_pyscf_integrals, to_desc_order_sparse
 # TODO use hilbert for this
 @jax.jit
 def unpack_du(x):
-    x_ = x.reshape(x.shape[:-1] + (2, -1))
+    x_ = x.reshape(x.shape[:-1] + (2, x.shape[-1]//2))
     return x_[..., 0, :], x_[..., 1, :]
 
 
