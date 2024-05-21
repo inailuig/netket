@@ -523,7 +523,12 @@ def sharding_decorator(f, sharded_args_tree, reduction_op_tree=False, **kwargs):
             out_specs = out_treedef.unflatten(_sele2(reduction_op, P(), P("i")))
 
             @partial(
-                shard_map, mesh=mesh, in_specs=in_specs, out_specs=out_specs, **kwargs
+                shard_map,
+                mesh=mesh,
+                in_specs=in_specs,
+                out_specs=out_specs,
+                **kwargs,
+                check_rep=False,
             )
             def _f(*args):
                 # workaround for shard_map not supporting non-array args part 2/2
