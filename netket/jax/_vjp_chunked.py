@@ -14,7 +14,7 @@ from netket.utils import config
 from netket.jax.sharding import sharding_decorator
 
 from ._chunk_utils import _chunk as _tree_chunk, _unchunk as _tree_unchunk
-
+from ._scanmap import _tree_add, _tree_zeros_like
 
 def _trash_tuple_elements(t, nums=()):
     assert isinstance(t, tuple)
@@ -52,6 +52,12 @@ def _vjp(fun, cotangents, *primals, nondiff_argnums=(), conjugate=False, has_aux
     return y, res, *aux
 
 
+
+def _gen_append_cond_vjp(primals, nondiff_argnums, chunk_argnums):
+    diff_argnums = filter(lambda i: i not in nondiff_argnums, range(len(primals)))
+    return tuple(map(lambda i: i in chunk_argnums, diff_argnums))
+
+
 def __vjp_fun_chunked(
     fun,
     primals,
@@ -61,47 +67,87 @@ def __vjp_fun_chunked(
     chunk_size,
     conjugate,
     _vjp,
-    _append_cond_fun,
     has_aux,
+    return_forward,
+    _append_cond_fun = _gen_append_cond_vjp,
+    _cotangent_is_scalar=False,
+    _fwd_reduction_fn = _tree_add,
+    _fwd_zero_fn = _tree_zeros_like,
+    _output_reduction_fn = _tree_add,
+    _output_zero_fn = _tree_zeros_like,
 ):
-    append_cond = _append_cond_fun(primals, nondiff_argnums, chunk_argnums)
+    append_cond = _gen_append_cond_vjp(primals, nondiff_argnums, chunk_argnums)
+    if return_forward and _cotangent_is_scalar:
+        append_cond = (0, append_cond)  # 0 encodes to use _fwd_reduction_fn below; TODO nicer
+    elif return_forward:
+        append_cond = (True, append_cond)
 
     if has_aux:
         append_cond = append_cond + (True,)
 
-    scan_fun = partial(scan_append_reduce, append_cond=append_cond)
+    reduction_fun = _fwd_reduction_fn
+    zero_fun=_output_zero_fn
+    if return_forward:
+        def _fun2(f1, f2, x1, x2):
+            y1, res1 = x1
+            y2, res2 = x2
+            return f(y1, y2), f2(res1, res2)
+        reduction_fun = partial(_fun2, _fwd_reduction_fn, _output_reduction_fn)
+        zero_fun = partial(_fun2, _fwd_zero_fn, _output_zero_fn)
+
+    scan_fun = partial(scan_append_reduce, append_cond=append_cond, op=reduction_fun, zero_fun=zero_fun)
+
     primals_chunk, primals_rest = zip(
         *[
             _tree_chunk(p, chunk_size) if i in chunk_argnums else (p, p)
             for i, p in enumerate(primals)
         ]
     )
-    cotangents_chunk, cotangents_rest = _tree_chunk(cotangents, chunk_size)
-    __vjp = partial(
-        _vjp, nondiff_argnums=nondiff_argnums, conjugate=conjugate, has_aux=has_aux
-    )
 
     n_chunks = jax.tree_util.tree_leaves(primals_chunk[chunk_argnums[0]])[0].shape[0]
     n_rest = jax.tree_util.tree_leaves(primals_rest[chunk_argnums[0]])[0].shape[0]
-
     if n_chunks > 0:
-        # cotangents, and whatever requested in primals; +2 since 0 is the function, and 1 is cotangents
-        argnums = (1,) + tuple(map(lambda x: x + 2, chunk_argnums))
-        res_chunk = scanmap(
-            __vjp,
-            scan_fun=scan_fun,
-            argnums=argnums,
-        )(fun, cotangents_chunk, *primals_chunk)
-    if n_rest > 0:
-        res_rest = __vjp(fun, cotangents_rest, *primals_rest)
+        __vjp = partial(
+            _vjp, nondiff_argnums=nondiff_argnums, conjugate=conjugate, has_aux=has_aux
+        )
+    if _cotangent_is_scalar:
+        # +2 since 0 is the function, and 1 is cotangents
+        argnums = tuple(map(lambda x: x + 2, chunk_argnums))
+
+        if n_chunks > 0:
+            # cotangents, and whatever requested in primals; +2 since 0 is the function, and 1 is cotangents
+            argnums = tuple(map(lambda x: x + 2, chunk_argnums))
+
+            res_chunk = scanmap(
+                __vjp,
+                scan_fun=scan_fun,
+                argnums=argnums,
+            )(fun, cotangents, *primals_chunk)
+        if n_rest > 0:
+            res_rest = __vjp(fun, cotangents, *primals_rest)
+
+    else:
+        cotangents_chunk, cotangents_rest = _tree_chunk(cotangents, chunk_size)
+        if n_chunks > 0:
+            # cotangents, and whatever requested in primals; +2 since 0 is the function, and 1 is cotangents
+            argnums = (1,) + tuple(map(lambda x: x + 2, chunk_argnums))
+            res_chunk = scanmap(
+                __vjp,
+                scan_fun=scan_fun,
+                argnums=argnums,
+            )(fun, cotangents_chunk, *primals_chunk)
+        if n_rest > 0:
+            res_rest = __vjp(fun, cotangents_rest, *primals_rest)
 
     if n_chunks > 0 and n_rest > 0:
 
         def _f(c, l, r):
             if c:
                 return _tree_unchunk(l, r)
+            elif c == 0:
+                return _fwd_reduction_fn(l, r)
             else:
-                return jax.tree_map(jax.lax.add, l, r)
+                return _output_reduction_fn(l, r)
 
         return jax.tree_util.tree_map(_f, append_cond, res_chunk, res_rest)
     elif n_chunks > 0:
@@ -119,21 +165,16 @@ def __vjp_fun_chunked(
         return __vjp(fun, cotangents, *primals)
 
 
-def _gen_append_cond_vjp(primals, nondiff_argnums, chunk_argnums):
-    diff_argnums = filter(lambda i: i not in nondiff_argnums, range(len(primals)))
-    return tuple(map(lambda i: i in chunk_argnums, diff_argnums))
 
-
-_gen_append_cond_value_vjp = compose(lambda t: (True, t), _gen_append_cond_vjp)
+# _gen_append_cond_value_vjp = compose(lambda t: (True, t), _gen_append_cond_vjp)
 
 _vjp_fun_chunked = partial(
     __vjp_fun_chunked,
-    _vjp=compose(lambda yr: yr[1] if len(yr) == 2 else yr[1:], _vjp),
-    _append_cond_fun=_gen_append_cond_vjp,
+    _vjp=compose(lambda yr: yr[1] if len(yr) == 2 else yr[1:], _vjp), # TODO move this into __vjp_fun_chunked
+    return_forward=False,
 )
-_value_and_vjp_fun_chunked = partial(
-    __vjp_fun_chunked, _vjp=_vjp, _append_cond_fun=_gen_append_cond_value_vjp
-)
+_value_and_vjp_fun_chunked = partial(__vjp_fun_chunked, _vjp=_vjp, return_forward=True)
+
 
 
 def check_chunk_size(chunk_argnums, chunk_size, *primals):
@@ -161,6 +202,7 @@ def _vjp_chunked(
     nondiff_argnums,
     return_forward,
     conjugate,
+    _cotangent_is_scalar,
 ):
     assert chunk_size is not None
 
@@ -172,6 +214,7 @@ def _vjp_chunked(
         chunk_size=chunk_size,
         conjugate=conjugate,
         has_aux=has_aux,
+        _cotangent_is_scalar=_cotangent_is_scalar,
     )
 
 
@@ -185,6 +228,7 @@ def _vjp_chunked(
         "nondiff_argnums",
         "return_forward",
         "conjugate",
+        "_cotangent_is_scalar",
     ),
 )
 def vjp_chunked(
@@ -196,6 +240,7 @@ def vjp_chunked(
     nondiff_argnums=(),
     return_forward=False,
     conjugate=False,
+    _cotangent_is_scalar=False,
 ):
     """calculate the vjp in small chunks for a function where the leading dimension of the output only depends on the leading dimension of some of the arguments
 
@@ -303,6 +348,7 @@ def vjp_chunked(
                 nondiff_argnums=nondiff_argnums,
                 return_forward=return_forward,
                 conjugate=conjugate,
+                _cotangent_is_scalar=_cotangent_is_scalar,
             )
 
             reduction_op_tree = (red_ops,)
@@ -354,5 +400,6 @@ def vjp_chunked(
             nondiff_argnums=nondiff_argnums,
             return_forward=return_forward,
             conjugate=conjugate,
+            _cotangent_is_scalar=_cotangent_is_scalar,
         )
         return Partial(_vjpc, primals)
