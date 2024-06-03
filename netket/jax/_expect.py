@@ -20,10 +20,12 @@ from functools import partial
 import jax
 from jax import numpy as jnp
 
-from netket.stats import statistics as mpi_statistics, mean as mpi_mean, Stats
+from netket.stats import statistics as mpi_statistics, sum as mpi_sum, Stats
+from netket.utils import mpi
 from netket.utils.types import PyTree
 
-from netket.jax import apply_chunked, vjp as nkvjp
+from ._vjp_chunked import vjp_chunked
+from ._vmap_chunked import apply_chunked
 
 
 def expect(
@@ -158,39 +160,34 @@ def _expect_bwd(n_chains, chunk_size, in_axes, log_pdf, expected_fun, residuals,
     pars, σ, cost_args, ΔL_σ = residuals
     dL̄, dL̄_stats = dout
 
-    if chunk_size is None:
+    chunk_argnums = (1, 2)
+    if in_axes is not None:
+        for i, ax in enumerate(cost_args):
+            if ax is not None:
+                if ax != 0:
+                    raise NotImplementedError
+                chunk_argnums = chunk_argnums + (i+3,)
 
-        def f(pars, σ, *cost_args):
-            log_p = log_pdf(pars, σ)
-            term1 = jax.vmap(jnp.multiply)(ΔL_σ, log_p)
-            term2 = expected_fun(pars, σ, *cost_args)
-            out = mpi_mean(term1 + term2, axis=0)
-            out = out.sum()
-            return out
+    n_samples = σ.shape[0] * mpi.n_nodes
 
-    else:
-        if in_axes is None:
-            in_axes = (
-                None,
-                0,
-            ) + tuple(None for _ in cost_args)
+    def f(pars, σ, ΔL_σ, *cost_args):
+        log_p = log_pdf(pars, σ)
+        term1 = jax.vmap(jnp.multiply)(ΔL_σ, log_p)
+        term2 = expected_fun(pars, σ, *cost_args)
+        out = mpi_sum(term1 + term2, axis=0)
+        out = out.sum() / n_samples
+        return out
 
-        def chunked_f(ΔL_σ, pars, σ, *cost_args):
-            log_p = apply_chunked(log_pdf, chunk_size=chunk_size, in_axes=(None, 0))(
-                pars, σ
-            )
-            term1 = jax.vmap(jnp.multiply)(ΔL_σ, log_p)
-            term2 = apply_chunked(expected_fun, chunk_size=chunk_size, in_axes=in_axes)(
-                pars, σ, *cost_args
-            )
-            out = mpi_mean(term1 + term2, axis=0)
-            out = out.sum()
-            return out
-
-        # capture ΔL_σ to not differentiate through it
-        f = partial(chunked_f, ΔL_σ)
-
-    _, pb = nkvjp(f, pars, σ, *cost_args)
+    pb = vjp_chunked(
+        f,
+        pars,
+        σ,
+        ΔL_σ,
+        *cost_args,
+        chunk_argnums=(1, 2),
+        chunk_size=chunk_size,
+        nondiff_argnums=(1, 2),
+    )
     grad_f = pb(dL̄)
     return grad_f
 
