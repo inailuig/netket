@@ -60,6 +60,7 @@ def __vjp_fun_chunked(
     conjugate,
     _vjp,
     _append_cond_fun,
+    _split_scalar_tan=False,
 ):
     append_cond = _append_cond_fun(primals, nondiff_argnums, chunk_argnums)
     scan_fun = partial(scan_append_reduce, append_cond=append_cond)
@@ -67,9 +68,13 @@ def __vjp_fun_chunked(
         _tree_chunk(p, chunk_size) if i in chunk_argnums else p
         for i, p in enumerate(primals)
     )
-    cotangents = _tree_chunk(cotangents, chunk_size)
-    # cotangents, and whatever requested in primals; +2 since 0 is the function, and 1 is cotangents
-    argnums = (1,) + tuple(map(lambda x: x + 2, chunk_argnums))
+    if _split_scalar_tan:
+        # +2 since 0 is the function, and 1 is cotangents
+        argnums = tuple(map(lambda x: x + 2, chunk_argnums))
+    else:
+        cotangents = _tree_chunk(cotangents, chunk_size)
+        # cotangents, and whatever requested in primals; +2 since 0 is the function, and 1 is cotangents
+        argnums = (1,) + tuple(map(lambda x: x + 2, chunk_argnums))
     res = scanmap(
         partial(_vjp, nondiff_argnums=nondiff_argnums, conjugate=conjugate),
         scan_fun=scan_fun,
@@ -122,6 +127,7 @@ def _vjp_chunked(
     nondiff_argnums,
     return_forward,
     conjugate,
+    _split_scalar_tan,
 ):
     assert chunk_size is not None
 
@@ -135,6 +141,7 @@ def _vjp_chunked(
             nondiff_argnums=nondiff_argnums,
             chunk_size=chunk_size,
             conjugate=conjugate,
+            _split_scalar_tan=_split_scalar_tan,
         )
 
 
@@ -148,6 +155,7 @@ def _vjp_chunked(
         "nondiff_argnums",
         "return_forward",
         "conjugate",
+        "_split_scalar_tan",
     ),
 )
 def vjp_chunked(
@@ -159,6 +167,7 @@ def vjp_chunked(
     nondiff_argnums=(),
     return_forward=False,
     conjugate=False,
+    _split_scalar_tan=False,
 ):
     """calculate the vjp in small chunks for a function where the leading dimension of the output only depends on the leading dimension of some of the arguments
 
@@ -267,6 +276,7 @@ def vjp_chunked(
                 nondiff_argnums=nondiff_argnums,
                 return_forward=return_forward,
                 conjugate=conjugate,
+                _split_scalar_tan=_split_scalar_tan,
             )
             vjp_fun_sh = Partial(
                 sharding_decorator(
@@ -313,5 +323,6 @@ def vjp_chunked(
             nondiff_argnums=nondiff_argnums,
             return_forward=return_forward,
             conjugate=conjugate,
+            _split_scalar_tan=_split_scalar_tan,
         )
         return Partial(_vjpc, primals)

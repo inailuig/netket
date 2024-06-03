@@ -166,7 +166,7 @@ def _expect_bwd(n_chains, chunk_size, in_axes, log_pdf, expected_fun, residuals,
             if ax is not None:
                 if ax != 0:
                     raise NotImplementedError
-                chunk_argnums = chunk_argnums + (i+3,)
+                chunk_argnums = chunk_argnums + (i + 3,)
 
     n_samples = σ.shape[0] * mpi.n_nodes
 
@@ -186,7 +186,8 @@ def _expect_bwd(n_chains, chunk_size, in_axes, log_pdf, expected_fun, residuals,
         *cost_args,
         chunk_argnums=(1, 2),
         chunk_size=chunk_size,
-        nondiff_argnums=(1, 2),
+        nondiff_argnums=(2,),
+        _split_scalar_tan=True,
     )
     grad_f = pb(dL̄)
     return grad_f
