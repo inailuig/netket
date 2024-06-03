@@ -60,7 +60,16 @@ def _expect(n_chains, log_pdf, expected_fun, pars, σ, *expected_fun_args):
 
 
 def _expect_fwd(n_chains, log_pdf, expected_fun, pars, σ, *expected_fun_args):
-    L_σ = expected_fun(pars, σ, *expected_fun_args)
+    #L_σ = expected_fun(pars, σ, *expected_fun_args)
+
+    def f2(pars, σ, *cost_args):
+        term2 = expected_fun(pars, σ, *cost_args)
+        out = mpi_mean(term2, axis=0)
+        out = out.sum()
+        return out
+
+    L_σ, pb2 = nkvjp(f2, pars, σ, *cost_args)
+
     if n_chains is not None:
         L_σ_r = L_σ.reshape((n_chains, -1))
     else:
@@ -71,10 +80,11 @@ def _expect_fwd(n_chains, log_pdf, expected_fun, pars, σ, *expected_fun_args):
     L̄_σ = L̄_stat.mean
     # L̄_σ = L_σ.mean(axis=0)
 
+    # NB we cannot use vjp_chunked on this function because of the centering here which requries the whole mean
     # Use the baseline trick to reduce the variance
     ΔL_σ = L_σ - L̄_σ
 
-    return (L̄_σ, L̄_stat), (pars, σ, expected_fun_args, ΔL_σ)
+    return (L̄_σ, L̄_stat), (pars, σ, expected_fun_args, ΔL_σ, pb2)
 
 
 # TODO: in principle, the gradient of an expectation is another expectation,
@@ -82,19 +92,20 @@ def _expect_fwd(n_chains, log_pdf, expected_fun, pars, σ, *expected_fun_args):
 # But I don't know how to transform log_prob_fun into grad(log_prob_fun) while
 # keeping the chunk dimension and without a loop through the chunk dimension
 def _expect_bwd(n_chains, log_pdf, expected_fun, residuals, dout):
-    pars, σ, cost_args, ΔL_σ = residuals
+    pars, σ, cost_args, ΔL_σ, pb2 = residuals
     dL̄, dL̄_stats = dout
 
-    def f(pars, σ, *cost_args):
+    def f1(ΔL_σ, pars, σ, *cost_args):
         log_p = log_pdf(pars, σ)
         term1 = jax.vmap(jnp.multiply)(ΔL_σ, log_p)
-        term2 = expected_fun(pars, σ, *cost_args)
-        out = mpi_mean(term1 + term2, axis=0)
+        out = mpi_mean(term2, axis=0)
         out = out.sum()
         return out
 
-    _, pb = nkvjp(f, pars, σ, *cost_args)
-    grad_f = pb(dL̄)
+    _, pb1 = nkvjp(partial(f1, ΔL_σ), pars, σ, *cost_args)
+    grad_f2 = pb2(dL̄)
+    grad_f1 = pb1(dL̄)
+    grad_f = jax.tree_map(jax.lax.add, grad_f2, grad_f1)
     return grad_f
 
 
