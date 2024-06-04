@@ -66,9 +66,9 @@ def _expect_fwd(n_chains, log_pdf, expected_fun, pars, σ, *expected_fun_args):
         term2 = expected_fun(pars, σ, *cost_args)
         out = mpi_mean(term2, axis=0)
         out = out.sum()
-        return out
+        return out, term2
 
-    L_σ, pb2 = nkvjp(f2, pars, σ, *cost_args)
+    _, pb2, L_σ = nkvjp(f2, pars, σ, *expected_fun_args, has_aux=True)
 
     if n_chains is not None:
         L_σ_r = L_σ.reshape((n_chains, -1))
@@ -98,7 +98,7 @@ def _expect_bwd(n_chains, log_pdf, expected_fun, residuals, dout):
     def f1(ΔL_σ, pars, σ, *cost_args):
         log_p = log_pdf(pars, σ)
         term1 = jax.vmap(jnp.multiply)(ΔL_σ, log_p)
-        out = mpi_mean(term2, axis=0)
+        out = mpi_mean(term1, axis=0)
         out = out.sum()
         return out
 
