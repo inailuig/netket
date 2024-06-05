@@ -22,6 +22,8 @@ def _eval_fun_in_chunks(vmapped_fun, chunk_size, argnums, *args, **kwargs):
     n_chunks = jax.tree_util.tree_leaves(args_chunks[argnums[0]])[0].shape[0]
     n_rest = jax.tree_util.tree_leaves(args_rest[argnums[0]])[0].shape[0]
 
+    #from IPython import embed; embed()
+
     if n_chunks > 0:
         y_chunks = scanmap(vmapped_fun, scan_append, argnums)(*args_chunks, **kwargs)
     if n_rest > 0:
