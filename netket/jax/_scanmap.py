@@ -91,17 +91,17 @@ def scan_append_reduce(f, x, append_cond, op=_tree_add, zero_fun=_tree_zeros_lik
     _get_op_part = partial(_multimap, lambda c, x: x if not c else None, append_cond)
     _tree_select = partial(_multimap, lambda c, t1, t2: t1 if c else t2, append_cond)
 
-    carry_init = True, zero_fun(_get_op_part(jax.eval_shape(f_flat, x0)))
 
-    def f_(carry, x):
-        is_first, y_carry = carry
+    carry_init = zero_fun(_get_op_part(jax.eval_shape(f_flat, x0)))
+
+    def f_(y_carry, x):
         y = f_flat(x)
         y_op = _get_op_part(y)
         y_append = _get_append_part(y)
         y_reduce = op(y_carry, y_op)
-        return (False, y_reduce), y_append
+        return y_reduce, y_append
 
-    (_, res_op), res_append = jax.lax.scan(f_, carry_init, x, unroll=1)
+    res_op, res_append = jax.lax.scan(f_, carry_init, x, unroll=1)
     # reconstruct the result from the reduced and appended parts in the two trees and unflatten
     return out_treedef.unflatten(_tree_select(res_append, res_op))
 
