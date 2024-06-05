@@ -86,13 +86,13 @@ def __vjp_fun_chunked(
     zero_fun=_output_zero_fn
     if return_forward:
         def _fun2(f1, f2, x1, x2):
-            y1, res1 = x1
-            y2, res2 = x2
-            return f1(y1, y2), f2(res1, res2)
+            y1, *res1 = x1
+            y2, *res2 = x2
+            return f1(y1, y2), *f2(res1, res2)
         reduction_fun = partial(_fun2, _fwd_reduction_fn, _output_reduction_fn)
         def _fun1(f1, f2, x):
-            x1, x2 = x
-            return f1(x1), f2(x2)
+            x1, *x2 = x
+            return f1(x1), *f2(x2)
         zero_fun = partial(_fun1, _fwd_zero_fn, _output_zero_fn)
 
     scan_fun = partial(scan_append_reduce, append_cond=append_cond, op=reduction_fun, zero_fun=zero_fun)
