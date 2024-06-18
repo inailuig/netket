@@ -173,6 +173,32 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
 
     return xp.astype(dtype), mels
 
+def prepare_coords_data_dict(mol, mo_coeff, cutoff=1e-11):
+    # TODO make this more modular
+    # TODO actually use cutoff everywhere
+    n_orbitals = int(mol.nao)
+
+    const, hij, hijkl = compute_pyscf_integrals(
+        mol, mo_coeff
+    )  # not in normal order
+    hij = hij * (jnp.abs(hij) > cutoff)
+    hijkl = hijkl * (jnp.abs(hijkl) > cutoff)
+
+    hijkl_sparse = 0.5 * sparse.COO.from_numpy(hijkl)
+    hij_sparse = sparse.COO.from_numpy(hij)
+
+    arrays_desc_order = (
+        const,
+        hij_sparse,
+        to_desc_order_sparse(hijkl_sparse, cutoff),
+    )
+    coords_data_dict = _sparse_arrays_to_coords_data_dict(arrays_desc_order)
+
+
+    v = _sparse_arrays_to_coords_data_dict([hijkl_sparse])[4]
+    v = v[0][:, [0, 1, 3, 2]], *v[1:]  # swap ijkl->ijlk
+    return coords_data_dict, v
+
 
 @struct.dataclass
 class Chemistry2ndJax(DiscreteJaxOperator):
@@ -203,30 +229,15 @@ class Chemistry2ndJax(DiscreteJaxOperator):
         # TODO actually use cutoff everywhere
         n_orbitals = int(mol.nao)
 
-        const, hij, hijkl = compute_pyscf_integrals(
-            mol, mo_coeff
-        )  # not in normal order
-        hij = hij * (jnp.abs(hij) > cutoff)
-        hijkl = hijkl * (jnp.abs(hijkl) > cutoff)
+        coords_data_dict, v = prepare_coords_data_dict(mol, mo_coeff, cutoff=cutoff):
 
-        hijkl_sparse = 0.5 * sparse.COO.from_numpy(hijkl)
-        hij_sparse = sparse.COO.from_numpy(hij)
+        operator_data = _prepare_operator_data_from_coords_data_dict(coords_data_dict, n_orbitals)
 
-        arrays_desc_order = (
-            const,
-            hij_sparse,
-            to_desc_order_sparse(hijkl_sparse, cutoff),
-        )
-        coords_data_dict = _sparse_arrays_to_coords_data_dict(arrays_desc_order)
-        operator_data = _prepare_operator_data_from_coords_data_dict(
-            coords_data_dict, n_orbitals
-        )
-
-        v = _sparse_arrays_to_coords_data_dict([hijkl_sparse])[4]
-        v = v[0][:, [0, 1, 3, 2]], *v[1:]  # swap ijkl->ijlk
+        # process mixed terms
         sw_diag, sw_offdiag = split_diag_offdiag(*v)
         data_offdiag_mixed = prepare_data(*sw_offdiag, n_orbitals, _sparse=False)
         data_diag_mixed = prepare_data_diagonal(*sw_diag, n_orbitals, _sparse=False)
+
         operator_data = *operator_data, {4: data_diag_mixed}, {4: data_offdiag_mixed}
 
         hi = SpinOrbitalFermions(n_orbitals, s=1 / 2, n_fermions_per_spin=mol.nelec)
