@@ -229,7 +229,7 @@ class Chemistry2ndJax(DiscreteJaxOperator):
         # TODO actually use cutoff everywhere
         n_orbitals = int(mol.nao)
 
-        coords_data_dict, v = prepare_coords_data_dict(mol, mo_coeff, cutoff=cutoff):
+        coords_data_dict, v = prepare_coords_data_dict(mol, mo_coeff, cutoff=cutoff)
 
         operator_data = _prepare_operator_data_from_coords_data_dict(coords_data_dict, n_orbitals)
 
