@@ -265,7 +265,7 @@ def _sparse_arrays_to_coords_data_dict(operators):
         if isinstance(A, sparse.COO):
             k = A.ndim
             if A.shape == ():
-                A = k.fill_value
+                A = A.fill_value
             else:
                 assert A.fill_value == 0
         # np.isscalar does not detect jax scalars so we use jnp here
