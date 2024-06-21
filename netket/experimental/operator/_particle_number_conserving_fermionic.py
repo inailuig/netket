@@ -138,7 +138,7 @@ def split_diag_offdiag(sites, weights):
 
 def _comb(kl, n):
     if len(kl) < n:
-        return jnp.zeros((0, n), dtype=kl.dtype)
+        return jnp.zeros((n, 0), dtype=kl.dtype)
     c = list(itertools.combinations(np.arange(len(kl)), n))
     return kl[np.array(c, dtype=kl.dtype).T[::-1]]
 
