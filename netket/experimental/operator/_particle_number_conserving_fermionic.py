@@ -154,9 +154,9 @@ def _jw_kernel(k_destroy, l_create, x):
     m = jnp.arange(x.shape[-1], dtype=k_destroy.dtype)
 
     # we apply the destruction operators in descending order,
-    # the jordan-wigner sign of an operator does not depend on sites larger than it, therefore
-    # we can compute it all in terms of the initial state.
-    # (sum the axis is the one of the indices we destroy/create (size number of operators//2))
+    # the jordan-wigner sign of an operator does not depend on sites larger than it, therefore,
+    # given it is in normal order, we can compute it all in terms of the initial state.
+    # (sum the axis which is the one of the indices we destroy/create (size number of operators//2))
     jw_mask_destroy = reduce_xor(k_destroy[..., None] > m, axes=0)
 
     # same for when we create again, except then have to apply it to the state where we already destroyed
