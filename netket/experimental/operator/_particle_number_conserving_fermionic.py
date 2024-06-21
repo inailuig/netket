@@ -63,7 +63,7 @@ def _prepare_data(sites_destr, sites_create, weights, n_orbitals, _sparse=True):
         ###
 
         # we pad with zeros, so we take create_array and weight_array of size nunique+1
-        # (wher the 0th element is the padding)
+        # (where the 0th element is the padding)
         # and put zeros in the index_array, for terms which dont exist
 
         ### simple, inefficient version
