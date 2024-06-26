@@ -160,7 +160,7 @@ _identity = lambda x: x
 
 
 def _prepare_mask(n, n_pad):
-    return jnp.ones(n + n_pad, dtype=bool).at[-n_pad:].set(0)
+    return jnp.ones(n + n_pad, dtype=bool).at[-n_pad:].set(False)
 
 
 def distribute_to_devices_along_axis(
@@ -189,19 +189,25 @@ def distribute_to_devices_along_axis(
               only returned if pad=True
     """
     if config.netket_experimental_sharding:
+        assert axis < inp_data.ndim
         if pad:
-            n = inp_data.shape[0]
+            old_shape = inp_data.shape
+            n = old_shape[axis]
+            ndim = len(old_shape)
             # pad to the next multiple of device_count
             device_count = jax.device_count()
-            n_pad = math.ceil(inp_data.shape[0] / device_count) * device_count - n
-            inp_data = jnp.pad(inp_data, ((0, n_pad), (0, 0)))
-            if pad_value is not None and n_pad > 0:
-                inp_data = inp_data.at[-n_pad:].set(pad_value)
+            n_pad = math.ceil(inp_data.shape[axis] / device_count) * device_count - n
 
-        shape = [
-            1,
-        ] * inp_data.ndim
-        shape[axis] = -1
+            inp_data = jnp.pad(inp_data, ((0, 0),)*axis + ((0, n_pad),) + ((0, 0),)*(ndim-axis-1))
+            if pad_value is not None and n_pad > 0:
+                pad_value = jnp.asarray(pad_value, dtype=inp_data.dtype)
+                # we support pad_value of the same rank as inp_data, using broadcasting from
+                # dynamic_update_slice; as well as scalars, which we broadcast:
+                if pad_value.size == 1:
+                    pad_value = pad_value.reshape((1,)*ndim)
+                inp_data = jax.lax.dynamic_update_slice(inp_data, pad_value, old_shape)
+
+        shape = (1,) * axis + (-1,) + (1,) * (ndim-axis-1)
         sharding = PositionalSharding(devices).reshape(shape)
         out_data = jax.jit(_identity, out_shardings=sharding)(inp_data)
         # TODO support gspmdsharding in numba wrapper and use this
