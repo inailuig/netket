@@ -34,7 +34,8 @@ def _eval_fun_in_chunks(fun, chunk_size, argnums, *args, _reduction_fn=None, **k
     # otherwise assume fun is vmapped and concatenate output
     if n_chunks > 0 and n_rest > 0:
         if _reduction_fn is not None:
-            return _reduction_fn(jnp.concatenate([y_chunks, y_rest[None]]))
+            y_concat = jax.tree_util.tree_map(lambda x, y: jnp.concatenate([x,y[None]]), y_chunks, y_rest)
+            return _reduction_fn(y_concat)
         else:
             return _unchunk(y_chunks, y_rest)
     elif n_chunks > 0:
