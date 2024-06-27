@@ -1,6 +1,7 @@
 from typing import Callable, Optional
 
 import jax
+import jax.numpy as jnp
 
 from ._chunk_utils import _chunk, _unchunk
 from ._scanmap import scanmap, scan_append
@@ -10,7 +11,7 @@ from netket.utils import config
 from netket.jax.sharding import sharding_decorator
 
 
-def _eval_fun_in_chunks(vmapped_fun, chunk_size, argnums, *args, **kwargs):
+def _eval_fun_in_chunks(fun, chunk_size, argnums, *args, _reduction_fn=None, **kwargs):
     # split inputs
     args_chunks, args_rest = zip(
         *[_chunk(a, chunk_size=chunk_size) if i in argnums else (a, a) for i, a in enumerate(args)]
@@ -20,18 +21,32 @@ def _eval_fun_in_chunks(vmapped_fun, chunk_size, argnums, *args, **kwargs):
     n_rest = jax.tree_util.tree_leaves(args_rest[argnums[0]])[0].shape[0]
 
     if n_chunks > 0:
-        y_chunks = scanmap(vmapped_fun, scan_append, argnums)(*args_chunks, **kwargs)
+        y_chunks = scanmap(fun, scan_append, argnums)(*args_chunks, **kwargs)
+    else:
+        y_chunks = None
     if n_rest > 0:
-        y_rest = vmapped_fun(*args_rest, **kwargs)
+        y_rest = fun(*args_rest, **kwargs)
+    else:
+        y_rest = None
 
+    # if _reduction_fn is given assume fun has an associative reduction at the output
+    # _reduction_fn needs to take the full y_chunks and y_rest and reduce it
+    # otherwise assume fun is vmapped and concatenate output
     if n_chunks > 0 and n_rest > 0:
-        return _unchunk(y_chunks, y_rest)
+        if _reduction_fn is not None:
+            return _reduction_fn(jnp.concatenate([y_chunks, y_rest[None]]))
+        else:
+            return _unchunk(y_chunks, y_rest)
     elif n_chunks > 0:
-        return _unchunk(y_chunks)
+        if _reduction_fn is not None:
+            return _reduction_fn(y_chunks)
+        else:
+            return _unchunk(y_chunks)
     elif n_rest > 0:
         return y_rest
     else:
-        return vmapped_fun(*args, **kwargs)
+        return fun(*args, **kwargs)
+
 
 
 def _eval_fun_in_chunks_sharding(vmapped_fun, chunk_size, argnums, *args, **kwargs):
