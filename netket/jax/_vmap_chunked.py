@@ -32,7 +32,7 @@ def _eval_fun_in_chunks_common(fun, chunk_size, argnums, *args, _reduction_fn=No
     else:
         y_rest = None
 
-    return y_chunks, y_rest    
+    return y_chunks, y_rest
 
 def _eval_fun_in_chunks(fun, chunk_size, argnums, *args, **kwargs):
     y_chunks, y_rest = _eval_fun_in_chunks_common(fun, chunk_size, argnums, *args, **kwargs)
@@ -52,14 +52,14 @@ def _eval_fun_in_chunks_sharding(vmapped_fun, chunk_size, argnums, *args, **kwar
     f = HashablePartial(_eval_fun_in_chunks, vmapped_fun, chunk_size, argnums, **kwargs)
     return sharding_decorator(f, sharded_args_tree)(*args)
 
-def _eval_fun_in_chunks_common_sharding(vmapped_fun, chunk_size, argnums, *args, **kwargs):
-    sharded_args_tree = tuple(i in argnums for i, a in enumerate(args))
-    f = HashablePartial(_eval_fun_in_chunks_common, vmapped_fun, chunk_size, argnums, **kwargs)
-    return sharding_decorator(f, sharded_args_tree)(*args)
+# def _eval_fun_in_chunks_common_sharding(vmapped_fun, chunk_size, argnums, *args, **kwargs):
+#     sharded_args_tree = tuple(i in argnums for i, a in enumerate(args))
+#     f = HashablePartial(_eval_fun_in_chunks_common, vmapped_fun, chunk_size, argnums, **kwargs)
+#     return sharding_decorator(f, sharded_args_tree)(*args)
 
 
-def _eval_fun_in_chunks_reduction(fun, chunk_size, argnums, *args, _eval_fun_in_chunks_common_impl = _eval_fun_in_chunks_common_sharding, _reduction_fn=None, **kwargs):
-    y_chunks, y_rest = _eval_fun_in_chunks_common_impl(fun, chunk_size, argnums, *args, **kwargs)
+def _eval_fun_in_chunks_reduction(fun, chunk_size, argnums, *args, _reduction_fn=None, **kwargs):
+    y_chunks, y_rest = _eval_fun_in_chunks_common(fun, chunk_size, argnums, *args, **kwargs)
     # assume fun has an associative reduction at the output
     # _reduction_fn needs to take the full y_chunks and y_rest and reduce it
     # otherwise assume fun is vmapped and concatenate output
@@ -72,14 +72,13 @@ def _eval_fun_in_chunks_reduction(fun, chunk_size, argnums, *args, _eval_fun_in_
     else:
         return _reduction_fn(None, fun(*args, **kwargs))
 
-
-def _eval_fun_in_chunks_sharding(vmapped_fun, chunk_size, argnums, *args, **kwargs):
+def _eval_fun_in_chunks_reduction_sharding(vmapped_fun, chunk_size, argnums, *args, _reduction_fn=None, _reduction_fn_sh=None, **kwargs):
     # Equivalent to `_eval_fun_in_chunks` above but preserves sharding,
     # by computing the vmapped_fun in chunks on every shard (which sits on a separate device)
     sharded_args_tree = tuple(i in argnums for i, a in enumerate(args))
-    f = HashablePartial(_eval_fun_in_chunks, vmapped_fun, chunk_size, argnums, **kwargs)
-    return sharding_decorator(f, sharded_args_tree)(*args)
-
+    f = HashablePartial(_eval_fun_in_chunks_reduction, vmapped_fun, chunk_size, argnums,_reduction_fn=_reduction_fn, **kwargs)
+    res = sharding_decorator(f, sharded_args_tree)(*args) # reduce inside device
+    return _reduction_fn_sh(res) # reduce over devices, first axis is for devices so we don't have to bother with psum etc
 
 def _chunk_vmapped_function(
     vmapped_fun: Callable,
