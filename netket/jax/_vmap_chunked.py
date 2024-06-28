@@ -11,7 +11,7 @@ from netket.utils import config
 from netket.jax.sharding import sharding_decorator
 
 
-def _eval_fun_in_chunks(fun, chunk_size, argnums, *args, _reduction_fn=None, **kwargs):
+def _eval_fun_in_chunks_common(fun, chunk_size, argnums, *args, _reduction_fn=None, **kwargs):
     # split inputs
     args_chunks, args_rest = zip(
         *[_chunk(a, chunk_size=chunk_size) if i in argnums else (a, a) for i, a in enumerate(args)]
@@ -19,6 +19,9 @@ def _eval_fun_in_chunks(fun, chunk_size, argnums, *args, _reduction_fn=None, **k
 
     n_chunks = jax.tree_util.tree_leaves(args_chunks[argnums[0]])[0].shape[0]
     n_rest = jax.tree_util.tree_leaves(args_rest[argnums[0]])[0].shape[0]
+
+    y_chunks = None
+    y_rest = None
 
     if n_chunks > 0:
         y_chunks = scanmap(fun, scan_append, argnums)(*args_chunks, **kwargs)
@@ -29,29 +32,45 @@ def _eval_fun_in_chunks(fun, chunk_size, argnums, *args, _reduction_fn=None, **k
     else:
         y_rest = None
 
-    # if _reduction_fn is given assume fun has an associative reduction at the output
+    return y_chunks, y_rest    
+
+def _eval_fun_in_chunks(fun, chunk_size, argnums, *args, **kwargs):
+    y_chunks, y_rest = _eval_fun_in_chunks_common(fun, chunk_size, argnums, *args, **kwargs)
+    if y_chunks is not None and y_rest is not None:
+        return _unchunk(y_chunks, y_rest)
+    elif y_chunks is not None:
+        return _unchunk(y_chunks)
+    elif y_rest is not None:
+        return y_rest
+    else:
+        return y_rest
+
+def _eval_fun_in_chunks_sharding(vmapped_fun, chunk_size, argnums, *args, **kwargs):
+    # Equivalent to `_eval_fun_in_chunks` above but preserves sharding,
+    # by computing the vmapped_fun in chunks on every shard (which sits on a separate device)
+    sharded_args_tree = tuple(i in argnums for i, a in enumerate(args))
+    f = HashablePartial(_eval_fun_in_chunks, vmapped_fun, chunk_size, argnums, **kwargs)
+    return sharding_decorator(f, sharded_args_tree)(*args)
+
+def _eval_fun_in_chunks_common_sharding(vmapped_fun, chunk_size, argnums, *args, **kwargs):
+    sharded_args_tree = tuple(i in argnums for i, a in enumerate(args))
+    f = HashablePartial(_eval_fun_in_chunks_common, vmapped_fun, chunk_size, argnums, **kwargs)
+    return sharding_decorator(f, sharded_args_tree)(*args)
+
+
+def _eval_fun_in_chunks_reduction(fun, chunk_size, argnums, *args, _eval_fun_in_chunks_common_impl = _eval_fun_in_chunks_common_sharding, _reduction_fn=None, **kwargs):
+    y_chunks, y_rest = _eval_fun_in_chunks_common_impl(fun, chunk_size, argnums, *args, **kwargs)
+    # assume fun has an associative reduction at the output
     # _reduction_fn needs to take the full y_chunks and y_rest and reduce it
     # otherwise assume fun is vmapped and concatenate output
-    if n_chunks > 0 and n_rest > 0:
-        if _reduction_fn is not None:
-            return _reduction_fn(y_chunks, y_rest)
-        else:
-            return _unchunk(y_chunks, y_rest)
-    elif n_chunks > 0:
-        if _reduction_fn is not None:
-            return _reduction_fn(y_chunks, None)
-        else:
-            return _unchunk(y_chunks)
-    elif n_rest > 0:
-        if _reduction_fn is not None:
-            return _reduction_fn(None, y_rest)
-        else:
-            return y_rest
+    if y_chunks is not None and y_rest is not None:
+        return _reduction_fn(y_chunks, y_rest)
+    elif y_chunks is not None:
+        return _reduction_fn(y_chunks, None)
+    elif y_rest is not None:
+        return _reduction_fn(None, y_rest)
     else:
-        if _reduction_fn is not None:
-            return _reduction_fn(None, fun(*args, **kwargs))
-        else:
-            return y_rest
+        return _reduction_fn(None, fun(*args, **kwargs))
 
 
 def _eval_fun_in_chunks_sharding(vmapped_fun, chunk_size, argnums, *args, **kwargs):
