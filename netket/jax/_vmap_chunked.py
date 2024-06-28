@@ -34,20 +34,24 @@ def _eval_fun_in_chunks(fun, chunk_size, argnums, *args, _reduction_fn=None, **k
     # otherwise assume fun is vmapped and concatenate output
     if n_chunks > 0 and n_rest > 0:
         if _reduction_fn is not None:
-            y_concat = jax.tree_util.tree_map(lambda x, y: jnp.concatenate([x,y[None]]), y_chunks, y_rest)
-            return _reduction_fn(y_concat)
+            return _reduction_fn(y_chunks, y_rest)
         else:
             return _unchunk(y_chunks, y_rest)
     elif n_chunks > 0:
         if _reduction_fn is not None:
-            return _reduction_fn(y_chunks)
+            return _reduction_fn(y_chunks, None)
         else:
             return _unchunk(y_chunks)
     elif n_rest > 0:
-        return y_rest
+        if _reduction_fn is not None:
+            return _reduction_fn(None, y_rest)
+        else:
+            return y_rest
     else:
-        return fun(*args, **kwargs)
-
+        if _reduction_fn is not None:
+            return _reduction_fn(None, fun(*args, **kwargs))
+        else:
+            return y_rest
 
 
 def _eval_fun_in_chunks_sharding(vmapped_fun, chunk_size, argnums, *args, **kwargs):
