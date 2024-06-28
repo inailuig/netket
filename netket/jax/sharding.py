@@ -38,6 +38,9 @@ from jax.util import safe_zip
 from netket.utils import config, mpi
 from netket.errors import concrete_or_error, NumbaOperatorGetConnDuringTracingError
 
+from jax._src.util import safe_map, safe_zip
+
+
 
 def _convert_gspmdsharding_to_positionalsharding(x):
     # try to convert gspmdsharding to positional sharding
@@ -517,17 +520,19 @@ def sharding_decorator(f, sharded_args_tree, reduction_op_tree=False, **kwargs):
                 for a, c in safe_zip(args, sharded_args)
             )
 
-            # workaround for shard_map not supporting non-array args part 1/2
-            nonarray_args = tuple(not hasattr(a, "dtype") for a in args)
-            args = tuple(
-                Partial(partial(lambda x: x, a)) if c else a
-                for a, c in safe_zip(args, nonarray_args)
-            )
-
             mesh = Mesh(jax.devices(), axis_names=("i"))
-            in_specs = _sele2(sharded_args, P("i"), P())
-            out_specs = out_treedef.unflatten(_sele2(reduction_op, P(), P("i")))
 
+            # TODO simplify in_specs construction
+            in_specs = _sele2(sharded_args, P("i"), None)
+            def _fix(speca): # detect non-array vs non sharded array
+                spec, a = speca
+                if spec is None:
+                    if all(hasattr(l, "dtype") for l in jax.tree_util.tree_leaves(a)):
+                        spec = P()
+                return spec
+            in_specs = tuple(safe_map(_fix, safe_zip(in_specs, args)))
+
+            out_specs = out_treedef.unflatten(_sele2(reduction_op, P(), P("i")))
             @partial(
                 shard_map,
                 mesh=mesh,
@@ -537,14 +542,11 @@ def sharding_decorator(f, sharded_args_tree, reduction_op_tree=False, **kwargs):
                 check_rep=False,
             )
             def _f(*args):
-                # workaround for shard_map not supporting non-array args part 2/2
-                args = tuple(a() if c else a for a, c in safe_zip(args, nonarray_args))
 
                 # PRNGKey treatment 2/2
                 args = tuple(
                     a[0] if c == "key" else a for a, c in safe_zip(args, sharded_args)
                 )
-
                 res = f(*args_treedef.unflatten(args))
 
                 # apply reductions
