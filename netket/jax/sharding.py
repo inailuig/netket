@@ -208,9 +208,10 @@ def distribute_to_devices_along_axis(
                 # dynamic_update_slice; as well as scalars, which we broadcast:
                 if pad_value.size == 1:
                     pad_value = pad_value.reshape((1,)*ndim)
+                pad_value = jax.lax.broadcast_in_dim(pad_value, tuple(np.array(inp_data.shape) - np.array(old_shape)), range(ndim))
                 inp_data = jax.lax.dynamic_update_slice(inp_data, pad_value, old_shape)
 
-        shape = (1,) * axis + (-1,) + (1,) * (ndim-axis-1)
+        shape = (1,) * axis + (-1,) + (1,) * (inp_data.ndim-axis-1)
         sharding = PositionalSharding(devices).reshape(shape)
         out_data = jax.jit(_identity, out_shardings=sharding)(inp_data)
         # TODO support gspmdsharding in numba wrapper and use this
