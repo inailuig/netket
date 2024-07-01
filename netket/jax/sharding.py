@@ -231,6 +231,8 @@ def distribute_to_devices_along_axis(
         else:
             return out_data
     else:
+        if pad:
+            return inp_data, None
         return inp_data
 
 
