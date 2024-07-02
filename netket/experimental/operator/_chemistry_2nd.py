@@ -173,7 +173,7 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
 
     return xp.astype(dtype), mels
 
-def prepare_coords_data_dict(mol, mo_coeff, cutoff=1e-11):
+def prepare_coords_data(mol, mo_coeff, cutoff=1e-11):
     # TODO make this more modular
     # TODO actually use cutoff everywhere
     n_orbitals = int(mol.nao)
@@ -196,9 +196,17 @@ def prepare_coords_data_dict(mol, mo_coeff, cutoff=1e-11):
 
 
     v = _sparse_arrays_to_coords_data_dict([hijkl_sparse])[4]
-    v = v[0][:, [0, 1, 3, 2]], *v[1:]  # swap ijkl->ijlk
-    return coords_data_dict, v
+    coords_data_mixed = v[0][:, [0, 1, 3, 2]], *v[1:]  # swap ijkl->ijlk
+    return coords_data_dict, coords_data_mixed
 
+def prepare_operator_data_from_coords_data_dict_spin(coords_data_dict, coords_data_mixed, n_orbitals):
+    operator_data = _prepare_operator_data_from_coords_data_dict(coords_data_dict, n_orbitals)
+    # process mixed terms
+    sw_diag, sw_offdiag = split_diag_offdiag(*coords_data_mixed)
+    data_offdiag_mixed = prepare_data(*sw_offdiag, n_orbitals, _sparse=False)
+    data_diag_mixed = prepare_data_diagonal(*sw_diag, n_orbitals, _sparse=False)
+    operator_data = *operator_data, {4: data_diag_mixed}, {4: data_offdiag_mixed}
+    return operator_data
 
 @struct.dataclass
 class Chemistry2ndJax(DiscreteJaxOperator):
@@ -225,20 +233,9 @@ class Chemistry2ndJax(DiscreteJaxOperator):
 
     @classmethod
     def from_pyscf_molecule(cls, mol, mo_coeff, cutoff=1e-11):
-        # TODO make this more modular
         # TODO actually use cutoff everywhere
         n_orbitals = int(mol.nao)
-
-        coords_data_dict, v = prepare_coords_data_dict(mol, mo_coeff, cutoff=cutoff)
-
-        operator_data = _prepare_operator_data_from_coords_data_dict(coords_data_dict, n_orbitals)
-
-        # process mixed terms
-        sw_diag, sw_offdiag = split_diag_offdiag(*v)
-        data_offdiag_mixed = prepare_data(*sw_offdiag, n_orbitals, _sparse=False)
-        data_diag_mixed = prepare_data_diagonal(*sw_diag, n_orbitals, _sparse=False)
-
-        operator_data = *operator_data, {4: data_diag_mixed}, {4: data_offdiag_mixed}
-
+        coords_data_dict, coords_data_mixed = prepare_coords_data(mol, mo_coeff, cutoff=cutoff)
+        operator_data = prepare_operator_data_from_coords_data_dict_spin(coords_data_dict, coords_data_mixed, n_orbitals)
         hi = SpinOrbitalFermions(n_orbitals, s=1 / 2, n_fermions_per_spin=mol.nelec)
         return cls(hi, operator_data)
