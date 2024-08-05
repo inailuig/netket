@@ -286,7 +286,9 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
 
     @property
     def max_conn_size(self):
-        return NotImplemented
+        x = jax.ShapeDtypeStruct((1, self._hilbert.size), dtype=jnp.uint8)
+        _, mels = jax.eval_shape(self.get_conn_padded, x)
+        return mels.shape[1]
 
     @property
     def dtype(self):
