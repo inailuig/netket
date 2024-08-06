@@ -27,6 +27,7 @@ from ._fermion_operator_2nd_jax import FermionOperator2ndJax
 from ._particle_number_conserving_fermionic import (
     ParticleNumberConservingFermioperator2ndJax,
 )
+from ._chemistry_2nd import Chemistry2ndJax
 
 
 def compute_pyscf_integrals(mol, mo_coeff):
@@ -300,7 +301,7 @@ def from_pyscf_molecule(
     mo_coeff: Optional[np.ndarray] = None,
     *,
     cutoff: float = 1e-11,
-    implementation: DiscreteOperator = ParticleNumberConservingFermioperator2ndJax,
+    implementation: DiscreteOperator = Chemistry2ndJax,
     **kwargs,
 ) -> DiscreteOperator:
     r"""
@@ -373,10 +374,9 @@ def from_pyscf_molecule(
         mf = pyscf.scf.HF(molecule).run()
         mo_coeff = mf.mo_coeff
 
-    E_nuc, Tij, Vijkl = TV_from_pyscf_molecule(molecule, mo_coeff, cutoff=cutoff)
-
-    # todo add some kind of implementation registry
+    # Todo add some kind of implementation registry
     if implementation in [FermionOperator2nd, FermionOperator2ndJax]:
+        E_nuc, Tij, Vijkl = TV_from_pyscf_molecule(molecule, mo_coeff, cutoff=cutoff)
         ha = operator_from_arrays(
             E_nuc,
             Tij,
@@ -391,7 +391,12 @@ def from_pyscf_molecule(
             n_orbitals=int(molecule.nao), s=1 / 2, n_fermions_per_spin=molecule.nelec
         )
         # TV_from_pyscf_molecule computes the arrays in normal order
+        E_nuc, Tij, Vijkl = TV_from_pyscf_molecule(molecule, mo_coeff, cutoff=cutoff)
         ha = implementation.from_sparse_arrays_normal_order(
             hi, [E_nuc, Tij, 0.5 * Vijkl], **kwargs
         )
+    elif implementation is Chemistry2ndJax:
+        ha = Chemistry2ndJax.from_pyscf_molecule(mol, mo_coeff)
+    else:
+        raise NotImplementedError('Unknown Implementation')
     return ha
