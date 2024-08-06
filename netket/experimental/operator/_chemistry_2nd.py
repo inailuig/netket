@@ -110,8 +110,8 @@ def _get_conn_padded_interaction_up_down(
     return xp_down, xp_up, mels
 
 
-@partial(jax.jit, static_argnames="nelec")
-def get_conn_padded_pnc_spin(_operator_data, x, nelec):
+@partial(jax.jit, static_argnames=("nelec", "use_symm"))
+def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True):
     x_down, x_up = unpack_du(x)
     dtype = x_down.dtype
 
@@ -141,8 +141,15 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
         )
         xp_diag = x[..., None, :]
         # we use the symmetry in hijkl
-        # the udud term is equal to dudu and we can just compute one and multiply with 2
-        mels_diag = mels_diag + 2 * mels_du
+        if use_symm:
+            # the udud term is equal to dudu and we can just compute one and multiply with 2
+            mels_diag = mels_diag + 2 * mels_du
+        else:
+            *_, mels_ud = _get_conn_padded_interaction_up_down(
+                nelectron_up, nelectron_down, x_up, x_down, *v
+            )
+            mels_diag = mels_diag + mels_du + mels_ud
+
         xp_list = [xp_diag]
         mels_list = [mels_diag]
 
@@ -166,7 +173,16 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
         # we use the symmetry in hijkl
         # the udud term is equal to dudu and we can just compute one and multiply with 2
         xp_list.append(xp_du)
-        mels_list.append(2 * mels_du)
+        if use_symm:
+            mels_list.append(2 * mels_du)
+        else:
+            mels_list.append(mels_du)
+            *xp_ud, mels_ud = _get_conn_padded_interaction_up_down(
+                nelectron_up, nelectron_down, x_up, x_down, *v
+            )
+            xp_ud = tuple(reversed(xp_ud))
+            xp_list.append(xp_ud)
+            mels_list.append(mels_ud)
 
     xp = jnp.concatenate(xp_list, axis=-2)
     mels = jnp.concatenate(mels_list, axis=-1)
@@ -212,6 +228,7 @@ def prepare_operator_data_from_coords_data_dict_spin(coords_data_dict, coords_da
 class Chemistry2ndJax(DiscreteJaxOperator):
     _hilbert: SpinOrbitalFermions = struct.field(pytree_node=False)
     _operator_data: PyTree
+    _use_symm: bool = struct.field(pytree_node=False, default=True)
 
     @property
     def dtype(self):
@@ -230,7 +247,7 @@ class Chemistry2ndJax(DiscreteJaxOperator):
 
     def get_conn_padded(self, x):
         return get_conn_padded_pnc_spin(
-            self._operator_data, x, self._hilbert.n_fermions_per_spin
+            self._operator_data, x, self._hilbert.n_fermions_per_spin, self._use_symm,
         )
 
     @classmethod
