@@ -211,14 +211,15 @@ def _sparse_arrays_to_coords_data_spin(operators, cutoff=1e-11):
 def prepare_operator_data_from_coords_data_dict_spin(coords_data, coords_data_mixed, n_orbitals):
     operator_data = _prepare_operator_data_from_coords_data_dict(coords_data, n_orbitals)
     # process mixed terms
+    data_diag_mixed = {}
+    data_offdiag_mixed = {}
     if coords_data_mixed is not None:
         sw_diag, sw_offdiag = split_diag_offdiag(*coords_data_mixed)
-        data_offdiag_mixed = prepare_data(*sw_offdiag, n_orbitals, _sparse=False)
-        data_diag_mixed = prepare_data_diagonal(*sw_diag, n_orbitals, _sparse=False)
-        operator_data_mixed = {4: data_diag_mixed}, {4: data_offdiag_mixed}
-    else:
-        operator_data_mixed = {}, {}
-    operator_data = *operator_data, *operator_data_mixed
+        if len(sw_diag[-1]) > 0:
+            data_diag_mixed = {4: prepare_data_diagonal(*sw_diag, n_orbitals, _sparse=False)}
+        if len(sw_offdiag[-1]) > 0:
+            data_offdiag_mixed = {4: prepare_data(*sw_offdiag, n_orbitals, _sparse=False)}
+    operator_data = *operator_data, data_diag_mixed, data_offdiag_mixed
     return operator_data
 
 
