@@ -19,8 +19,9 @@ from ._particle_number_conserving_fermionic import (
     split_diag_offdiag,
     prepare_data,
     prepare_data_diagonal,
+    _collect_ops,
 )
-from .pyscf import compute_pyscf_integrals, to_desc_order_sparse
+from ._pyscf_utils import compute_pyscf_integrals, to_desc_order_sparse
 
 
 # TODO generalize this to a ParticleNumberConservingFermioperator2ndSpinJax
@@ -189,40 +190,37 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True):
 
     return xp.astype(dtype), mels
 
-def prepare_coords_data(mol, mo_coeff, cutoff=1e-11):
-    # TODO make this more modular
-    # TODO actually use cutoff everywhere
-    n_orbitals = int(mol.nao)
 
-    const, hij, hijkl = compute_pyscf_integrals(
-        mol, mo_coeff
-    )  # not in normal order
-    hij = hij * (jnp.abs(hij) > cutoff)
-    hijkl = hijkl * (jnp.abs(hijkl) > cutoff)
+def _sparse_arrays_to_coords_data_spin(operators, cutoff=1e-11):
+    # operators = [const, hij, hijkl]
+    # ops = {0: const, 2: hij_sparse, 4: hijkl_sparse}
+    ops = _collect_ops(operators)
+    for k in ops.keys():
+        if k not in (0,2,4):
+            raise NotImplementedError
+    hijkl_sparse = ops.get(4, None)
+    if hijkl_sparse is not None:
+        ops[4] = to_desc_order_sparse(hijkl_sparse, cutoff)
+        v = _sparse_arrays_to_coords_data_dict({4: hijkl_sparse})[4]
+        coords_data_mixed = v[0][:, [0, 1, 3, 2]], *v[1:]  # swap ijkl->ijlk
+    else:
+        coords_data_mixed = None
+    coords_data = _sparse_arrays_to_coords_data_dict(ops)
+    return coords_data, coords_data_mixed
 
-    hijkl_sparse = 0.5 * sparse.COO.from_numpy(hijkl)
-    hij_sparse = sparse.COO.from_numpy(hij)
-
-    arrays_desc_order = (
-        const,
-        hij_sparse,
-        to_desc_order_sparse(hijkl_sparse, cutoff),
-    )
-    coords_data_dict = _sparse_arrays_to_coords_data_dict(arrays_desc_order)
-
-
-    v = _sparse_arrays_to_coords_data_dict([hijkl_sparse])[4]
-    coords_data_mixed = v[0][:, [0, 1, 3, 2]], *v[1:]  # swap ijkl->ijlk
-    return coords_data_dict, coords_data_mixed
-
-def prepare_operator_data_from_coords_data_dict_spin(coords_data_dict, coords_data_mixed, n_orbitals):
-    operator_data = _prepare_operator_data_from_coords_data_dict(coords_data_dict, n_orbitals)
+def prepare_operator_data_from_coords_data_dict_spin(coords_data, coords_data_mixed, n_orbitals):
+    operator_data = _prepare_operator_data_from_coords_data_dict(coords_data, n_orbitals)
     # process mixed terms
-    sw_diag, sw_offdiag = split_diag_offdiag(*coords_data_mixed)
-    data_offdiag_mixed = prepare_data(*sw_offdiag, n_orbitals, _sparse=False)
-    data_diag_mixed = prepare_data_diagonal(*sw_diag, n_orbitals, _sparse=False)
-    operator_data = *operator_data, {4: data_diag_mixed}, {4: data_offdiag_mixed}
+    if coords_data_mixed is not None:
+        sw_diag, sw_offdiag = split_diag_offdiag(*coords_data_mixed)
+        data_offdiag_mixed = prepare_data(*sw_offdiag, n_orbitals, _sparse=False)
+        data_diag_mixed = prepare_data_diagonal(*sw_diag, n_orbitals, _sparse=False)
+        operator_data_mixed = {4: data_diag_mixed}, {4: data_offdiag_mixed}
+    else:
+        operator_data_mixed = {}, {}
+    operator_data = *operator_data, *operator_data_mixed
     return operator_data
+
 
 @struct.dataclass
 class Chemistry2ndJax(DiscreteJaxOperator):
@@ -251,10 +249,29 @@ class Chemistry2ndJax(DiscreteJaxOperator):
         )
 
     @classmethod
+    def from_coords_data(cls, hilbert, coords_data, coords_data_mixed):
+        assert isinstance(hilbert, SpinOrbitalFermions)
+        assert hilbert.n_fermions is not None
+        assert hilbert.n_spin_subsectors == 2
+        n_orbitals = hilbert.n_orbitals
+        operator_data = prepare_operator_data_from_coords_data_dict_spin(coords_data, coords_data_mixed, n_orbitals)
+        return cls(hilbert, operator_data)
+
+    @classmethod
+    def from_sparse_arrays(cls, hilbert, operators, **kwargs):
+        coords_data, coords_data_mixed = _sparse_arrays_to_coords_data_spin(operators, **kwargs)
+        return cls.from_coords_data(hilbert, coords_data, coords_data_mixed)
+
+    @classmethod
     def from_pyscf_molecule(cls, mol, mo_coeff, cutoff=1e-11):
-        # TODO actually use cutoff everywhere
+        # TODO eventually deprecate this in favour of pyscf.py ?
         n_orbitals = int(mol.nao)
-        coords_data_dict, coords_data_mixed = prepare_coords_data(mol, mo_coeff, cutoff=cutoff)
-        operator_data = prepare_operator_data_from_coords_data_dict_spin(coords_data_dict, coords_data_mixed, n_orbitals)
         hi = SpinOrbitalFermions(n_orbitals, s=1 / 2, n_fermions_per_spin=mol.nelec)
-        return cls(hi, operator_data)
+
+        const, hij, hijkl = compute_pyscf_integrals(mol, mo_coeff)  # not in normal order
+        hij = hij * (jnp.abs(hij) > cutoff)
+        hij_sparse = sparse.COO.from_numpy(hij)
+        hijkl = hijkl * (jnp.abs(hijkl) > cutoff)
+        hijkl_sparse = 0.5 * sparse.COO.from_numpy(hijkl)
+
+        return cls.from_sparse_arrays(hi, [const, hij_sparse, hijkl_sparse], cutoff=cutoff)

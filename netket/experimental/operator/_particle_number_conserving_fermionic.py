@@ -259,7 +259,7 @@ def _to_fermiop_helper(index_array, create_array, weight_array):
     return terms, weights
 
 
-def _sparse_arrays_to_coords_data_dict(operators):
+def _collect_ops(operators):
     ops = {}
     for A in operators:
         if isinstance(A, sparse.COO):
@@ -281,6 +281,9 @@ def _sparse_arrays_to_coords_data_dict(operators):
             ops[k] = Ak + A
         else:
             ops[k] = A
+    return ops
+
+def _sparse_arrays_to_coords_data_dict(ops):
     const = ops.pop(0, None)
     coords_data_dict = {A.ndim: (A.coords.T, A.data) for A in ops.values()}
     if const is not None:
@@ -362,7 +365,7 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
 
     @classmethod
     def from_sparse_arrays_normal_order(cls, hilbert, operators, **kwargs):
-        terms = _sparse_arrays_to_coords_data_dict(operators)
+        terms = _sparse_arrays_to_coords_data_dict(_collect_ops(operators))
         return cls.from_coords_data_normal_order(hilbert, terms, **kwargs)
 
     @classmethod
