@@ -24,9 +24,6 @@ from ._particle_number_conserving_fermionic import (
 from ._pyscf_utils import compute_pyscf_integrals, to_desc_order_sparse
 
 
-# TODO generalize this to a ParticleNumberConservingFermioperator2ndSpinJax
-
-
 # TODO use hilbert for this
 @jax.jit
 def unpack_du(x):
@@ -98,7 +95,6 @@ def _get_conn_padded_interaction_up_down(
             up_create_is_not_occupied | up_is_diagonal
         )
 
-        # TODO do we need an extra minus sign? because we swapped the center two ops??
         sign = sign_up * sign_down
         mels = weight * both_not_occupied * sign
 
@@ -224,6 +220,8 @@ def prepare_operator_data_from_coords_data_dict_spin(coords_data, coords_data_mi
     operator_data = *operator_data, data_diag_mixed, data_offdiag_mixed
     return operator_data
 
+
+# TODO generalize this operator to spin > 1/2, > 4 operators
 
 @struct.dataclass
 class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
