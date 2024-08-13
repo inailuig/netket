@@ -268,8 +268,8 @@ def _collect_ops(operators):
                 A = A.fill_value
             else:
                 assert A.fill_value == 0
-        # np.isscalar does not detect jax scalars so we use jnp here
-        elif jnp.isscalar(A):
+        elif jnp.isscalar(A) or (hasattr(A, "__array__") and A.ndim==0):
+            A = np.asarray(A)
             k = 0
         elif hasattr(A, "__array__"):
             A = sparse.COO.from_numpy(np.asarray(A))
