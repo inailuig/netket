@@ -226,7 +226,7 @@ def prepare_operator_data_from_coords_data_dict_spin(coords_data, coords_data_mi
 
 
 @struct.dataclass
-class Chemistry2ndJax(DiscreteJaxOperator):
+class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
     """
     H = a + Σ_ijσ b_ij c_iσ^† c_jσ + Σ_ijklσρ c_ijkl  c_iσ^† c_jρ^† c_kρ c_lσ
     """

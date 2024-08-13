@@ -27,7 +27,7 @@ from ._fermion_operator_2nd_jax import FermionOperator2ndJax
 from ._particle_number_conserving_fermionic import (
     ParticleNumberConservingFermioperator2ndJax,
 )
-from ._chemistry_2nd import Chemistry2ndJax
+from ._particle_number_conserving_fermionic_spin import ParticleNumberConservingFermioperator2ndSpinJax
 
 from ._pyscf_utils import *
 
@@ -69,7 +69,7 @@ def from_pyscf_molecule(
     mo_coeff: Optional[np.ndarray] = None,
     *,
     cutoff: float = 1e-11,
-    implementation: DiscreteOperator = Chemistry2ndJax,
+    implementation: DiscreteOperator = ParticleNumberConservingFermioperator2ndSpinJax,
     **kwargs,
 ) -> DiscreteOperator:
     r"""
@@ -163,8 +163,8 @@ def from_pyscf_molecule(
         ha = implementation.from_sparse_arrays_normal_order(
             hi, [E_nuc, Tij, 0.5 * Vijkl], **kwargs
         )
-    elif implementation is Chemistry2ndJax:
-        ha = Chemistry2ndJax.from_pyscf_molecule(molecule, mo_coeff)
+    elif implementation is ParticleNumberConservingFermioperator2ndSpinJax:
+        ha = ParticleNumberConservingFermioperator2ndSpinJax.from_pyscf_molecule(molecule, mo_coeff)
     else:
         raise NotImplementedError('Unknown Implementation')
     return ha

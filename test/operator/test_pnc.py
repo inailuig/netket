@@ -1,7 +1,7 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
-from netket.experimental.operator import Chemistry2ndJax, FermionOperator2nd
+from netket.experimental.operator import ParticleNumberConservingFermioperator2ndSpinJax, FermionOperator2nd
 from netket.experimental.hilbert import SpinOrbitalFermions
 
 import pytest
@@ -35,6 +35,6 @@ def test_pnc_spin():
             weights = weights + list(hijkl[ijkl])
     ha = FermionOperator2nd(hi, terms=terms, weights=weights)
 
-    ha2 = Chemistry2ndJax.from_sparse_arrays(hi, [c, hij*(jnp.abs(hij) > cutoff), hijkl*(jnp.abs(hijkl) > cutoff)])
+    ha2 = ParticleNumberConservingFermioperator2ndSpinJax.from_sparse_arrays(hi, [c, hij*(jnp.abs(hij) > cutoff), hijkl*(jnp.abs(hijkl) > cutoff)])
 
     np.testing.assert_allclose(ha.to_dense(), ha2.to_dense())
