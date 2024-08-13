@@ -1,0 +1,40 @@
+import numpy as np
+import jax
+import jax.numpy as jnp
+from netket.experimental.operator import Chemistry2ndJax, FermionOperator2nd
+from netket.experimental.hilbert import SpinOrbitalFermions
+
+import pytest
+
+def test_pnc_spin():
+    N = 7
+    n = 3
+    cutoff = 1e-4
+    key = np.random.randint(2**32)
+
+    k1, k2, k3 = jax.random.split(jax.random.key(key), 3)
+    hijkl = jax.random.normal(k1, shape=(N,)*4)
+    hij = jax.random.normal(k2, shape=(N,)*2)
+    c = jax.random.normal(k3)
+
+    hi = SpinOrbitalFermions(N, s=1/2, n_fermions_per_spin=(n,n))
+
+    terms = []
+    weights = []
+    terms = terms + [""]
+    weights = weights + [c]
+    idx_maps = [lambda i: i, lambda i: i+N] # spin down and up sectors
+    for s in idx_maps:
+        ij = jnp.where(jnp.abs(hij)>cutoff)
+        terms = terms + [f"{s(i)}^ {s(j)}" for i,j in list(zip(*ij))]
+        weights = weights + list(hij[ij])
+    for s1 in idx_maps:
+        for s2 in idx_maps:
+            ijkl = jnp.where(jnp.abs(hijkl)>cutoff)
+            terms = terms + [f"{s1(i)}^ {s2(j)}^ {s2(k)} {s1(l)}" for i,j,k,l in list(zip(*ijkl))]
+            weights = weights + list(hijkl[ijkl])
+    ha = FermionOperator2nd(hi, terms=terms, weights=weights)
+
+    ha2 = Chemistry2ndJax.from_sparse_arrays(hi, [c, hij*(jnp.abs(hij) > cutoff), hijkl*(jnp.abs(hijkl) > cutoff)])
+
+    np.testing.assert_allclose(ha.to_dense(), ha2.to_dense())
