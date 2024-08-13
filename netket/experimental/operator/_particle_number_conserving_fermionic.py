@@ -369,6 +369,17 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
     @classmethod
     def from_sparse_arrays_normal_order(cls, hilbert, operators, **kwargs):
         terms = _sparse_arrays_to_coords_data_dict(_collect_ops(operators))
+
+        for k, v in terms.items():
+            if k <= 2:
+                pass
+            idx = v[0]
+            idx_create = idx[:, :idx.shape[1]//2]
+            idx_destroy = idx[:, idx.shape[1]//2:]
+            for idx_arr in idx_destroy, idx_create:
+                if (jnp.diff(idx_arr) > 0).any():
+                    raise ValueError('Input arrays are not in normal order')
+
         return cls.from_coords_data_normal_order(hilbert, terms, **kwargs)
 
     @classmethod
