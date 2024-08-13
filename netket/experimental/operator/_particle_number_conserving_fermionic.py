@@ -309,6 +309,9 @@ def _prepare_operator_data_from_coords_data_dict(
 
 @struct.dataclass
 class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
+    """
+    H = a + Σ_ij b_ij c_i^† c_j + Σ_ijkl c_ijkl  c_i^† c_j^† c_k c_l + Σ_ijklmn c_ijklmn c_i^† c_j^† c_k^† c_l c_m c_n + ...
+    """
     _hilbert: SpinOrbitalFermions = struct.field(pytree_node=False)
     _operator_data: PyTree
 
