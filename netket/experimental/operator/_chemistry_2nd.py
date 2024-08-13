@@ -181,14 +181,16 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True):
             *xp_ud, mels_ud = _get_conn_padded_interaction_up_down(
                 nelectron_up, nelectron_down, x_up, x_down, *v
             )
-            xp_ud = tuple(reversed(xp_ud))
+            xp_ud = pack_du(*reversed(xp_ud))
             xp_list.append(xp_ud)
             mels_list.append(mels_ud)
-
-    xp = jnp.concatenate(xp_list, axis=-2)
-    mels = jnp.concatenate(mels_list, axis=-1)
-
-    return xp.astype(dtype), mels
+    if len(xp_list) > 0:
+        xp = jnp.concatenate(xp_list, axis=-2).astype(dtype)
+        mels = jnp.concatenate(mels_list, axis=-1)
+    else:
+        xp = jnp.zeros((*x.shape[:-1], 0,x.shape[-1]), dtype=dtype)
+        mels = jnp.zeros(xp.shape[:-1]) # TODO dtype?
+    return xp, mels
 
 
 def _sparse_arrays_to_coords_data_spin(operators, cutoff=1e-11):
@@ -227,7 +229,7 @@ def prepare_operator_data_from_coords_data_dict_spin(coords_data, coords_data_mi
 class Chemistry2ndJax(DiscreteJaxOperator):
     _hilbert: SpinOrbitalFermions = struct.field(pytree_node=False)
     _operator_data: PyTree
-    _use_symm: bool = struct.field(pytree_node=False, default=True)
+    _use_symm: bool = struct.field(pytree_node=False, default=False)
 
     @property
     def dtype(self):
@@ -275,4 +277,4 @@ class Chemistry2ndJax(DiscreteJaxOperator):
         hijkl = hijkl * (jnp.abs(hijkl) > cutoff)
         hijkl_sparse = 0.5 * sparse.COO.from_numpy(hijkl)
 
-        return cls.from_sparse_arrays(hi, [const, hij_sparse, hijkl_sparse], cutoff=cutoff)
+        return cls.from_sparse_arrays(hi, [const, hij_sparse, hijkl_sparse], cutoff=cutoff).replace(_use_symm=True)
