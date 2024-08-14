@@ -113,6 +113,7 @@ def _get_conn_padded_interaction_up_down(
 @partial(jax.jit, static_argnames=("nelec", "use_symm", "n_spin_subsectors"))
 def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True, n_spin_subsectors=2):
     xs = unpack_du(x, n_spin_subsectors)
+    xs_diag = tuple(a[..., None, :] for a in xs)
     dtype = xs[0].dtype
 
     xp_list = []
@@ -133,23 +134,26 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True, n_spin_sub
     for k, v in _operator_data[2].items():
         if k != 4:
             raise NotImplementedError
-        if n_spin_subsectors != 2:
-            raise NotImplementedError
-        x_down, x_up = xs
-        nelectron_down, nelectron_up = nelec
-        *_, mels_du = _get_conn_padded_interaction_up_down(
-            nelectron_down, nelectron_up, x_down, x_up, *v
-        )
-        xp_diag = x[..., None, :]
-        # we use the symmetry in hijkl
-        if use_symm:
-            # the udud term is equal to dudu and we can just compute one and multiply with 2
-            mels_diag = mels_diag + 2 * mels_du
-        else:
-            *_, mels_ud = _get_conn_padded_interaction_up_down(
-                nelectron_up, nelectron_down, x_up, x_down, *v
-            )
-            mels_diag = mels_diag + mels_du + mels_ud
+
+        for i in range(n_spin_subsectors):
+            for j in range(i+1, n_spin_subsectors):
+                # here j>i
+                xi, xj = xs[i], xs[j]
+                nelectroni, nelectronj = nelec[i], nelec[j]
+
+                *_, melsij = _get_conn_padded_interaction_up_down(
+                    nelectroni, nelectronj, xi, xj, *v
+                )
+                xp_diag = x[..., None, :]
+                # we use the symmetry in hijkl
+                if use_symm:
+                    # the udud term is equal to dudu and we can just compute one and multiply with 2
+                    mels_diag = mels_diag + 2 * melsij
+                else:
+                    *_, melsji = _get_conn_padded_interaction_up_down(
+                        nelectronj, nelectroni, xj, xi, *v
+                    )
+                    mels_diag = mels_diag + melsij + melsji
 
         xp_list = [xp_diag]
         mels_list = [mels_diag]
@@ -157,36 +161,36 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True, n_spin_sub
     for k, v in _operator_data[1].items():
         for i, (xi, nelectroni) in enumerate(zip(xs, nelec)):
             xpi, melsi = _get_conn_padded(nelectroni, xi, *v)
-            xs_ = tuple(a[..., None, :] for a in xs)
-            xpi = pack_du(*xs_[:i], xpi, *xs_[i+1:])
+            xpi = pack_du(*xs_diag[:i], xpi, *xs_diag[i+1:])
             xp_list.append(xpi)
             mels_list.append(melsi)
 
     for k, v in _operator_data[3].items():
         if k != 4:
             raise NotImplementedError
-        if n_spin_subsectors != 2:
-            raise NotImplementedError
+        for i in range(n_spin_subsectors):
+            for j in range(i+1, n_spin_subsectors):
+                # here j>i
+                xi, xj = xs[i], xs[j]
+                nelectroni, nelectronj = nelec[i], nelec[j]
 
-        x_down, x_up = xs
-        nelectron_down, nelectron_up = nelec
-        *xp_du, mels_du = _get_conn_padded_interaction_up_down(
-            nelectron_down, nelectron_up, x_down, x_up, *v
-        )
-        xp_du = pack_du(*xp_du)
-        xp_list.append(xp_du)
-        if use_symm:
-            # we use the symmetry in hijkl
-            # the udud term is equal to dudu and we can just compute one and multiply with 2
-            mels_list.append(2 * mels_du)
-        else:
-            mels_list.append(mels_du)
-            *xp_ud, mels_ud = _get_conn_padded_interaction_up_down(
-                nelectron_up, nelectron_down, x_up, x_down, *v
-            )
-            xp_ud = pack_du(*reversed(xp_ud))
-            xp_list.append(xp_ud)
-            mels_list.append(mels_ud)
+                xpi, xpj, melsij = _get_conn_padded_interaction_up_down(
+                    nelectroni, nelectronj, xi, xj, *v
+                )
+                xpij = pack_du(*xs_diag[:i], xpi, *xs_diag[i+1:j], xpj, *xs_diag[j+1:])
+                xp_list.append(xpij)
+                if use_symm:
+                    # we use the symmetry in hijkl
+                    # the udud term is equal to dudu and we can just compute one and multiply with 2
+                    mels_list.append(2 * melsij)
+                else:
+                    mels_list.append(melsij)
+                    xpj, xpi, melsji = _get_conn_padded_interaction_up_down(
+                        nelectronj, nelectroni, xj, xi, *v
+                    )
+                    xpji = pack_du(*xs_diag[:i], xpi, *xs_diag[i+1:j], xpj, *xs_diag[j+1:])
+                    xp_list.append(xpji)
+                    mels_list.append(melsji)
     if len(xp_list) > 0:
         xp = jnp.concatenate(xp_list, axis=-2).astype(dtype)
         mels = jnp.concatenate(mels_list, axis=-1)
