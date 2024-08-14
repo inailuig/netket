@@ -16,6 +16,7 @@ from netket.utils.types import PyTree
 
 from ._fermion_operator_2nd_jax import FermionOperator2ndJax
 
+from netket.experimental.operator._pyscf_utils import to_desc_order_sparse
 
 def _prepare_data(sites_destr, sites_create, weights, n_orbitals, _sparse=True):
     # we encode sites_create==sites_destr by passing sites_create=None
@@ -380,6 +381,15 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
                 if (jnp.diff(idx_arr) > 0).any():
                     raise ValueError('Input arrays are not in normal order')
 
+        return cls.from_coords_data_normal_order(hilbert, terms, **kwargs)
+
+    @classmethod
+    def from_sparse_arrays(cls, hilbert, operators, **kwargs):
+        # daggers on the left, but not necessarily desc order
+        ops = _collect_ops(operators)
+        cutoff = kwargs.get('cutoff', 0)
+        ops = jax.tree_util.tree_map(partial(to_desc_order_sparse, cutoff=cutoff), ops)
+        terms = _sparse_arrays_to_coords_data_dict(ops)
         return cls.from_coords_data_normal_order(hilbert, terms, **kwargs)
 
     @classmethod
