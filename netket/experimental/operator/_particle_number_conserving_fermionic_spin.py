@@ -296,34 +296,51 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
 #     def from_fermiop(cls, ha, **kwargs):
 #         hi = ha.hilbert
 #
-#         t = _fermiop_terms_to_arrays(ha.terms, ha.weights)
-#         t =
-#         if len(set(t.keys()).difference([0,2,4])) != 0:
-#             raise NotImplementedError
+#         # t = { size : (sites, sectors, daggers, weights) }
+#         t = _fermiop_terms_to_arrays_spin(ha.terms, ha.weights, hi.n_orbitals, hi.n_spin_subsectors)
+#         operators = []
+#         for k, (sites, sectors, daggers, weights) in t.items():
+#             for i in range(n_spin_subsectors):
+#                 if not (((2*daggers-1)*(sectors==i)).sum(axis=-1) == 0).all():
+#                     raise ValueError # does not conserve particle number per sector
+#
+#             sector_count = jax.vmap(partial(jnp.bincount, length=n_spin_subsectors))(sectors)
+#
+#             if k == 0:
+#                 operators = operators + [weights.reshape(())]
+#             elif k == 2:
+#                 # at this point we know there is only one sector this acts on
+#                 sector = sectors[:, 0]  # = sectors[:, 1]
+#                 for i in range(n_spin_subsectors):
+#                     m = sector==i
+#                     sites_ = sites[m]
+#                     daggers_ = daggers[m]
+#                     weights_ = weights[m]
+#
+#                 pass
+#             elif k == 4:
+#                 pass
+#             else:
+#                 raise NotImplementedError
+#
 #
 #         return cls.from_sparse_arrays(hi, operators, **kwargs)
 #
+# def _split_spin_sectors(sites, n_orbitals, n_spin_subsectors):
+#     n_ops = sites.shape[1]
+#     if n_ops == 0:
+#         return sites, jnp.zeros_like(sites)
+#     L = np.arange(n_spin_subsectors)*n_orbitals
+#     R = np.arange(1, n_spin_subsectors+1)*n_orbitals
+#     sectors_mask = ((sites[...,None] >= L) & (sites[...,None] < R)) # n_terms x n_ops x n_spin_subsectors
+#     sectors = jnp.einsum('...i,i', sectors_mask, jnp.arange(n_spin_subsectors)).astype(np.int32)
+#     sites = sites - sectors * n_orbitals
+#     return sites, sectors
+#
+# def _fermiop_terms_to_arrays_spin(terms, weights, n_orbitals, n_spin_subsectors):
+#     d = _fermiop_terms_to_arrays(terms, weights)
+#     # { size : (sites, sectors, daggers, weights) }
+#     return {k: (*_split_spin_sectors(v[0], n_orbitals, n_spin_subsectors), *v[1:]) for k, v in d.items()}
 #
 # def _to_normal_order(sites, daggers, weights):
 #     pass
-#
-# def split_spin_sectors(sites, daggers, weights, N, n_spin_subsectors):
-#     n_ops = sites.shape[1]
-#     if n_ops == 0:
-#         return # TODO
-#     L = np.arange(n_spin_subsectors)*N
-#     R = np.arange(1, n_spin_subsectors+1)*N
-#     sectors_mask = ((sites[...,None] >= L) & (sites[...,None] < R)) # n_terms x n_ops x n_spin_subsectors
-#     if n_ops == 2:
-#         n_sectors_acting_on = sectors_mask.any(axis=-2).sum(axis=-1)
-#         if not (n_sectors_acting_on==1).all():
-#             raise ValueError # hopping between different sectors
-#         for i in range(n_spin_subsectors):
-#             m = sectors_mask[:, 0, :][:, i]
-#             si = sites[m] - N*i
-#             di = daggers[m]
-#             wi = weights[m]
-#     elif n_ops == 4:
-#         pass
-#     else:
-#         raise NotImplementedError
