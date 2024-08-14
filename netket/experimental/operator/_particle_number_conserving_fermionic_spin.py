@@ -110,8 +110,9 @@ def _get_conn_padded_interaction_up_down(
     return xp_down, xp_up, mels
 
 
-@partial(jax.jit, static_argnames=("nelec", "use_symm", "n_spin_subsectors"))
-def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True, n_spin_subsectors=2):
+@partial(jax.jit, static_argnames=("nelec", "use_symm"))
+def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True):
+    n_spin_subsectors = len(nelec)
     xs = unpack_du(x, n_spin_subsectors)
     xs_diag = tuple(a[..., None, :] for a in xs)
     dtype = xs[0].dtype
@@ -232,7 +233,7 @@ def prepare_operator_data_from_coords_data_dict_spin(coords_data, coords_data_mi
     return operator_data
 
 
-# TODO generalize this operator to spin > 1/2, > 4 operators
+# TODO generalize it to >4 fermionic operators
 
 @struct.dataclass
 class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
@@ -267,7 +268,7 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
     def from_coords_data(cls, hilbert, coords_data, coords_data_mixed):
         assert isinstance(hilbert, SpinOrbitalFermions)
         assert hilbert.n_fermions is not None
-        assert hilbert.n_spin_subsectors == 2
+        assert hilbert.n_spin_subsectors >= 2
         n_orbitals = hilbert.n_orbitals
         operator_data = prepare_operator_data_from_coords_data_dict_spin(coords_data, coords_data_mixed, n_orbitals)
         return cls(hilbert, operator_data)
