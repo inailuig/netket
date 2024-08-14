@@ -291,3 +291,39 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
         hijkl_sparse = 0.5 * sparse.COO.from_numpy(hijkl)
 
         return cls.from_sparse_arrays(hi, [const, hij_sparse, hijkl_sparse], cutoff=cutoff).replace(_use_symm=True)
+
+#     @classmethod
+#     def from_fermiop(cls, ha, **kwargs):
+#         hi = ha.hilbert
+#
+#         t = _fermiop_terms_to_arrays(ha.terms, ha.weights)
+#         t =
+#         if len(set(t.keys()).difference([0,2,4])) != 0:
+#             raise NotImplementedError
+#
+#         return cls.from_sparse_arrays(hi, operators, **kwargs)
+#
+#
+# def _to_normal_order(sites, daggers, weights):
+#     pass
+#
+# def split_spin_sectors(sites, daggers, weights, N, n_spin_subsectors):
+#     n_ops = sites.shape[1]
+#     if n_ops == 0:
+#         return # TODO
+#     L = np.arange(n_spin_subsectors)*N
+#     R = np.arange(1, n_spin_subsectors+1)*N
+#     sectors_mask = ((sites[...,None] >= L) & (sites[...,None] < R)) # n_terms x n_ops x n_spin_subsectors
+#     if n_ops == 2:
+#         n_sectors_acting_on = sectors_mask.any(axis=-2).sum(axis=-1)
+#         if not (n_sectors_acting_on==1).all():
+#             raise ValueError # hopping between different sectors
+#         for i in range(n_spin_subsectors):
+#             m = sectors_mask[:, 0, :][:, i]
+#             si = sites[m] - N*i
+#             di = daggers[m]
+#             wi = weights[m]
+#     elif n_ops == 4:
+#         pass
+#     else:
+#         raise NotImplementedError
