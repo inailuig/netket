@@ -259,6 +259,19 @@ def _to_fermiop_helper(index_array, create_array, weight_array):
 
     return terms, weights
 
+def _fermiop_terms_to_arrays(terms, weights):
+    out = {}
+    for t, w in zip(terms, weights):
+        if len(t) == 0:  # constant
+            out[0] = np.zeros((1, 0), dtype=np.int32), np.zeros((1, 0), dtype=np.int8), np.array([w])
+        else:
+            sites, daggers = np.array(t).T
+            l = len(daggers)
+            assert l % 2 == 0
+            assert 2 * daggers.sum() == l
+            tl, dl, wl= out.get(l, ([], [], []))
+            out[l] = tl + [sites,], dl + [daggers,], wl + [w,]  # fmt: skip
+    return {k: (jnp.array(v[0], dtype=np.int32), jnp.array(v[1], dtype=np.int8), jnp.array(v[2])) for k, v in out.items()}
 
 def _collect_ops(operators):
     ops = {}
@@ -395,21 +408,8 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
     @classmethod
     def from_fermiop(cls, ha, **kwargs):
         ha = ha.to_normal_order()
-        terms = {}
-        for t, w in zip(ha.terms, ha.weights):
-            if len(t) == 0:  # constant
-                terms[0] = np.zeros((1, 0), dtype=np.int32), np.array([w])
-            else:
-                sites, daggers = np.array(t).T
-                l = len(daggers)
-                assert l % 2 == 0
-                assert 2 * daggers.sum() == l
-                tl, wl = terms.get(l, ([], []))
-                terms[l] = tl + [sites,], wl + [w,]  # fmt: skip
-        terms = {
-            k: (jnp.array(v[0], dtype=np.int32), jnp.array(v[1]))
-            for k, v in terms.items()
-        }
+        t = _fermiop_terms_to_arrays(ha.terms, ha.weights)
+        terms = {k: (v[0], v[2]) for k, v in t.items()} # drop daggers
         return cls.from_coords_data_normal_order(ha.hilbert, terms, **kwargs)
 
     def to_fermiop(self, cls=FermionOperator2ndJax):
