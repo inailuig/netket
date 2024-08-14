@@ -110,12 +110,10 @@ def _get_conn_padded_interaction_up_down(
     return xp_down, xp_up, mels
 
 
-@partial(jax.jit, static_argnames=("nelec", "use_symm"))
-def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True):
-    x_down, x_up = unpack_du(x)
-    dtype = x_down.dtype
-
-    nelectron_down, nelectron_up = nelec
+@partial(jax.jit, static_argnames=("nelec", "use_symm", "n_spin_subsectors"))
+def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True, n_spin_subsectors=2):
+    xs = unpack_du(x, n_spin_subsectors)
+    dtype = xs[0].dtype
 
     xp_list = []
     mels_list = []
@@ -123,12 +121,11 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True):
     mels_diag = 0
 
     for k, v in _operator_data[0].items():
-        _, mels_uu = _get_conn_padded(nelectron_up, x_up, *v)
-        mels_diag = mels_diag + mels_uu
-        if k != 0:
-            _, mels_dd = _get_conn_padded(nelectron_down, x_down, *v)
-            mels_diag = mels_diag + mels_dd
-
+        for xi, nelectroni in zip(xs, nelec):
+            _, melsi = _get_conn_padded(nelectroni, xi, *v)
+            mels_diag = mels_diag + melsi
+            if k ==0:
+                break
         xp_diag = x[..., None, :]
         xp_list = [xp_diag]
         mels_list = [mels_diag]
@@ -136,6 +133,10 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True):
     for k, v in _operator_data[2].items():
         if k != 4:
             raise NotImplementedError
+        if n_spin_subsectors != 2:
+            raise NotImplementedError
+        x_down, x_up = xs
+        nelectron_down, nelectron_up = nelec
         *_, mels_du = _get_conn_padded_interaction_up_down(
             nelectron_down, nelectron_up, x_down, x_up, *v
         )
@@ -154,26 +155,29 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True):
         mels_list = [mels_diag]
 
     for k, v in _operator_data[1].items():
-        xp_dd, mels_dd = _get_conn_padded(nelectron_down, x_down, *v)
-        xp_uu, mels_uu = _get_conn_padded(nelectron_up, x_up, *v)
-        xp_dd = pack_du(xp_dd, x_up[..., None, :])
-        xp_uu = pack_du(x_down[..., None, :], xp_uu)
-        xp_list.append(xp_dd)
-        xp_list.append(xp_uu)
-        mels_list.append(mels_dd)
-        mels_list.append(mels_uu)
+        for i, (xi, nelectroni) in enumerate(zip(xs, nelec)):
+            xpi, melsi = _get_conn_padded(nelectroni, xi, *v)
+            xs_ = tuple(a[..., None, :] for a in xs)
+            xpi = pack_du(*xs_[:i], xpi, *xs_[i+1:])
+            xp_list.append(xpi)
+            mels_list.append(melsi)
 
     for k, v in _operator_data[3].items():
         if k != 4:
             raise NotImplementedError
+        if n_spin_subsectors != 2:
+            raise NotImplementedError
+
+        x_down, x_up = xs
+        nelectron_down, nelectron_up = nelec
         *xp_du, mels_du = _get_conn_padded_interaction_up_down(
             nelectron_down, nelectron_up, x_down, x_up, *v
         )
         xp_du = pack_du(*xp_du)
-        # we use the symmetry in hijkl
-        # the udud term is equal to dudu and we can just compute one and multiply with 2
         xp_list.append(xp_du)
         if use_symm:
+            # we use the symmetry in hijkl
+            # the udud term is equal to dudu and we can just compute one and multiply with 2
             mels_list.append(2 * mels_du)
         else:
             mels_list.append(mels_du)
