@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 from netket.experimental.operator import ParticleNumberConservingFermioperator2ndJax, ParticleNumberConservingFermioperator2ndSpinJax, FermionOperator2nd
 from netket.experimental.hilbert import SpinOrbitalFermions
+from functools import partial
 
 import pytest
 
@@ -49,10 +50,13 @@ def test_pnc():
 
     np.testing.assert_allclose(ha.to_dense(), ha2.to_dense())
 
-
-def test_pnc_spin():
-    N = 7
-    n = 3
+@pytest.mark.parametrize("N", [5])
+@pytest.mark.parametrize("n", [2,3])
+@pytest.mark.parametrize("s", [1/2, 1, 3/2])
+def test_pnc_spin(N, n, s):
+    # N = 7
+    # n = 3
+    # s = 1/2
     cutoff = 1e-4
     key = np.random.randint(2**32)
 
@@ -61,13 +65,16 @@ def test_pnc_spin():
     hij = jax.random.normal(k2, shape=(N,)*2)
     c = jax.random.normal(k3)
 
-    hi = SpinOrbitalFermions(N, s=1/2, n_fermions_per_spin=(n,n))
+    n_spin_subsectors = int(round(2*s+1))
+
+    hi = SpinOrbitalFermions(N, s=s, n_fermions_per_spin=(n,)*n_spin_subsectors)
 
     terms = []
     weights = []
     terms = terms + [""]
     weights = weights + [c]
-    idx_maps = [lambda i: i, lambda i: i+N] # spin down and up sectors
+    _f = lambda j,i: i+j*N
+    idx_maps = [partial(_f, j) for j in range(n_spin_subsectors)] # spin sectors
     for s in idx_maps:
         ij = jnp.where(jnp.abs(hij)>cutoff)
         terms = terms + [f"{s(i)}^ {s(j)}" for i,j in list(zip(*ij))]
