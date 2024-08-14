@@ -1,9 +1,12 @@
+from functools import partial
 from typing import Optional
 
 import numpy as np
 
 import jax
 import jax.numpy as jnp
+
+from sympy.combinatorics.permutations import Permutation
 
 from netket.utils.optional_deps import import_optional_dependency
 
@@ -20,7 +23,7 @@ def compute_pyscf_integrals(mol, mo_coeff):
 
 
 def spinorb_from_spatial_sparse_coo2(tij_sparse, interleave=False, spin_values=[0, 1]):
-    sparse = import_optional_dependency("sparse", descr="TV_from_pyscf_molecule")
+    sparse = import_optional_dependency("sparse", descr="spinorb_from_spatial_sparse_coo2")
 
     # Σ_ijσ t_ij c†_iσ c_jσ
     # for σ ∈ spin_values
@@ -63,7 +66,7 @@ def spinorb_from_spatial_sparse_coo2(tij_sparse, interleave=False, spin_values=[
 def spinorb_from_spatial_sparse_coo4(
     vijkl_sparse, interleave=False, _order_preserving=False
 ):
-    sparse = import_optional_dependency("sparse", descr="TV_from_pyscf_molecule")
+    sparse = import_optional_dependency("sparse", descr="spinorb_from_spatial_sparse_coo4")
 
     # Σ_ijklμσ v_ijkl c†_iμ c†_jσ c_kμ c_lσ
     # interleave=True -> 2i+spin
@@ -102,33 +105,44 @@ def spinorb_from_spatial_sparse_coo4(
 
 
 def to_desc_order_sparse(vijkl_sparse, cutoff, set_zero_same=True):
-    sparse = import_optional_dependency("sparse", descr="TV_from_pyscf_molecule")
-
-    # !! use this only after adding spin, spinorb_from_spatial_sparse will be wrong
-    # because the (implicitly assumed) symmetries of the tensor are not conserved
+    sparse = import_optional_dependency("sparse", descr="to_desc_order_sparse")
 
     # assume (1,1,0,0) are already index order (daggers are left/ij)
     # swap i/j k/l so that i>j and k>l
-
     # now swap the larger one to the left, will cause lots of them to cancel
-    i, j, k, l = vijkl_sparse.coords
-    a = vijkl_sparse.data.copy()
-    a[np.where(i < j)] *= -1
-    a[np.where(k < l)] *= -1
-    if set_zero_same:
-        # set to zero all those where we try to create / destroy two on the same orbital
-        a[np.where(i == j)] *= 0
-        a[np.where(k == l)] *= 0
-    new_coords = np.array(
-        [np.maximum(i, j), np.minimum(i, j), np.maximum(k, l), np.minimum(k, l)]
-    )
-    # use coo to merge same indices
-    vijkl_sparse2 = sparse.COO(new_coords, a, shape=vijkl_sparse.shape)
-    # we might have some new almost zeros from the cancellations, make sure they are 0
-    new_coords2 = vijkl_sparse2.coords
-    a2 = vijkl_sparse2.data
-    mask = np.abs(a2) > cutoff
-    return sparse.COO(new_coords2[:, mask], a2[mask], shape=vijkl_sparse.shape)
+
+    n = vijkl_sparse.ndim
+    assert n%2 == 0
+    if n > 2:
+        ij = vijkl_sparse.coords[:n//2]
+        kl = vijkl_sparse.coords[n//2:]
+        a = vijkl_sparse.data.copy()
+
+        perm_ij = np.argsort(-ij, axis=0)
+        perm_kl = np.argsort(-kl, axis=0)
+
+        ij_desc = ij[perm_ij, np.arange(ij.shape[1])]
+        kl_desc = kl[perm_kl, np.arange(kl.shape[1])]
+        _parity = partial(np.apply_along_axis, lambda x: Permutation(x).parity(), 0)
+        a *= 1-2*(_parity(perm_ij) ^ _parity(perm_kl))
+        if set_zero_same:
+            # set to zero / remove all those where we try to create / destroy two on the same orbital
+            mask = (np.diff(ij_desc, axis=0) == 0).any(axis=0) | (np.diff(kl_desc, axis=0) == 0).any(axis=0)
+            a = a[~mask]
+            ij_desc = ij_desc[:, ~mask]
+            kl_desc = kl_desc[:, ~mask]
+        new_coords = np.array(
+            [*ij_desc, *kl_desc]
+        )
+        # use coo to merge same indices
+        vijkl_sparse = sparse.COO(new_coords, a, shape=vijkl_sparse.shape)
+        # we might have some new almost zeros from the cancellations, make sure they are 0
+        new_coords2 = vijkl_sparse.coords
+        a2 = vijkl_sparse.data
+        mask = np.abs(a2) > cutoff
+        return sparse.COO(new_coords2[:, mask], a2[mask], shape=vijkl_sparse.shape)
+    else:
+        return vijkl_sparse
 
 
 def spinorb_from_spatial_sparse(tij_sparse, vijkl_sparse, interleave=False):
