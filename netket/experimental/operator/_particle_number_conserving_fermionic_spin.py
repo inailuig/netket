@@ -24,26 +24,29 @@ from ._particle_number_conserving_fermionic import (
 from ._pyscf_utils import compute_pyscf_integrals, to_desc_order_sparse
 
 
-# TODO use hilbert for this
-@jax.jit
-def unpack_du(x):
-    x_ = x.reshape(x.shape[:-1] + (2, x.shape[-1]//2))
-    return x_[..., 0, :], x_[..., 1, :]
+# TODO do this in hilbert
+@partial(jax.jit, static_argnames='n_spin_subsectors')
+def unpack_du(x, n_spin_subsectors=2):
+    assert x.shape[-1] % n_spin_subsectors == 0
+    x_ = x.reshape(x.shape[:-1] + (n_spin_subsectors, x.shape[-1]//n_spin_subsectors))
+    return tuple(x_[..., i, :] for i in range(n_spin_subsectors))
 
 
 @jax.jit
-def pack_du(xd, xu):
-    xd, xu = jnp.broadcast_arrays(xd, xu)
+def pack_du(*xs):
+    xs = jnp.broadcast_arrays(*xs)
+    xd = xs[0]
+    n_spin_subsectors = len(xs)
     res = jnp.zeros(
         xd.shape[:-1]
         + (
-            2,
+            n_spin_subsectors,
             xd.shape[-1],
         ),
         dtype=xd.dtype,
     )
-    res = res.at[..., 0, :].set(xd)
-    res = res.at[..., 1, :].set(xu)
+    for i, xi in enumerate(xs):
+        res = res.at[..., i, :].set(xi)
     return jax.lax.collapse(res, res.ndim - 2, res.ndim)
 
 
