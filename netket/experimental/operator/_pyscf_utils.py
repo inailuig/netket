@@ -102,19 +102,19 @@ def spinorb_from_spatial_sparse_coo4(
     )
 
 def _parity(x):
-    # compute the parity of a permutation (along axis 0)
+    # compute the parity of a permutation (along axis 1)
     # this is vectorized along all leading batch dimensions
     # see https://github.com/sympy/sympy/blob/96836db06ba6b78103dd4217db53db31502fb2f6/sympy/combinatorics/permutations.py#L115
     # this function is equivalent to
     #
     #from sympy.combinatorics.permutations import Permutation
-    #_parity = partial(np.apply_along_axis, lambda x: Permutation(x).parity(), 0)
+    #_parity = partial(np.apply_along_axis, lambda x: Permutation(x).parity(), 1)
 
-    n = x.shape[0]
-    A = x[:, None, ...] < x[None, :, ...]
+    n = x.shape[-1]
+    A = x[..., :, None] < x[..., None, :]
     mask = np.tril(np.ones((n,n), dtype=bool))
-    mask = np.expand_dims(mask, tuple(range(2, A.ndim)))
-    return np.bitwise_xor.reduce(A & mask, axis=(0,1))
+    mask = np.expand_dims(mask, tuple(range(0, A.ndim-2)))
+    return np.bitwise_xor.reduce(A & mask, axis=(-2, -1))
 
 def to_desc_order_sparse(vijkl_sparse, cutoff, set_zero_same=True):
     sparse = import_optional_dependency("sparse", descr="to_desc_order_sparse")
@@ -136,7 +136,7 @@ def to_desc_order_sparse(vijkl_sparse, cutoff, set_zero_same=True):
         ij_desc = ij[perm_ij, np.arange(ij.shape[1])]
         kl_desc = kl[perm_kl, np.arange(kl.shape[1])]
 
-        a *= 1-2*(_parity(perm_ij) ^ _parity(perm_kl))
+        a *= 1-2*(_parity(perm_ij.T) ^ _parity(perm_kl.T))
         if set_zero_same:
             # set to zero / remove all those where we try to create / destroy two on the same orbital
             mask = (np.diff(ij_desc, axis=0) == 0).any(axis=0) | (np.diff(kl_desc, axis=0) == 0).any(axis=0)
