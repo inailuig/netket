@@ -318,7 +318,7 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
                     m = sector==i
                     swd2 = sites[m], daggers[m], weights[m]
                     ops = extract_operators_normal_order(*swd2, n_orbitals=hi.n_orbitals)
-                    if k, v in _collect_ops(ops).items():
+                    for k, v in _collect_ops(ops).items():
                         operators_single_sector[i][k] = v
             elif k == 4:
                 # at this point we know that n_sectors_acting_on \in 1,2
@@ -330,7 +330,7 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
                         break
                     swd4_same = sites[m], daggers[m], weights[m]
                     ops = extract_operators_normal_order(*swd4_same, n_orbitals=hi.n_orbitals)
-                    if k, v in _collect_ops(ops).items():
+                    for k, v in _collect_ops(ops).items():
                         operators_single_sector[i][k] = v
 
                 for i in range(n_spin_subsectors): # two sectors
