@@ -5,6 +5,8 @@ import sparse
 import jax
 import jax.numpy as jnp
 
+import numpy as np
+
 from flax import struct
 
 from netket.operator import DiscreteJaxOperator
@@ -20,9 +22,11 @@ from ._particle_number_conserving_fermionic import (
     prepare_data,
     prepare_data_diagonal,
     _collect_ops,
+    _fermiop_terms_to_arrays,
 )
 from ._pyscf_utils import compute_pyscf_integrals, to_desc_order_sparse
 
+from ._normal_order_utils import to_normal_order, _split_spin_sectors, swd_to_sparse
 
 # TODO do this in hilbert
 @partial(jax.jit, static_argnames='n_spin_subsectors')
