@@ -329,22 +329,3 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
 
 
         return cls.from_sparse_arrays(hi, operators, **kwargs)
-
-def _split_spin_sectors(sites, n_orbitals, n_spin_subsectors):
-    n_ops = sites.shape[1]
-    if n_ops == 0:
-        return sites, jnp.zeros_like(sites)
-    L = np.arange(n_spin_subsectors)*n_orbitals
-    R = np.arange(1, n_spin_subsectors+1)*n_orbitals
-    sectors_mask = ((sites[...,None] >= L) & (sites[...,None] < R)) # n_terms x n_ops x n_spin_subsectors
-    sectors = jnp.einsum('...i,i', sectors_mask, jnp.arange(n_spin_subsectors)).astype(np.int32)
-    sites = sites - sectors * n_orbitals
-    return sites, sectors
-
-def _fermiop_terms_to_arrays_spin(terms, weights, n_orbitals, n_spin_subsectors):
-    d = _fermiop_terms_to_arrays(terms, weights)
-    # { size : (sites, sectors, daggers, weights) }
-    return {k: (*_split_spin_sectors(v[0], n_orbitals, n_spin_subsectors), *v[1:]) for k, v in d.items()}
-
-def _to_normal_order(sites, daggers, weights):
-    pass

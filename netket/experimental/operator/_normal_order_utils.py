@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 from functools import partial
 
+from netket.experimental.operator._pyscf_utils import _parity
 
 def _split_spin_sectors(sites, n_orbitals, n_spin_subsectors):
     n_ops = sites.shape[1]
@@ -21,7 +22,7 @@ def _fermiop_terms_to_arrays_spin(terms, weights, n_orbitals, n_spin_subsectors)
     return {k: (*_split_spin_sectors(v[0], n_orbitals, n_spin_subsectors), *v[1:]) for k, v in d.items()}
 
 
-    def prune(sites, daggers, weights):
+def prune(sites, daggers, weights):
     # remove ci ci and ci+ci+ on the same site i
     mask = ~((np.diff(daggers, axis=-1) == 0) & (np.diff(sites, axis=-1) == 0)).any(axis=-1)
     return sites[mask], daggers[mask], weights[mask]
@@ -54,8 +55,10 @@ def remove(i, j, x):
 
 import sparse
 
-def move_daggers_left(sites_, daggers_, weights_, sectors_ = None):
+def _move_daggers_left(sites_, daggers_, weights_):
     n = daggers_.shape[-1]
+    if n == 0:
+        return (sites_, daggers_, weights_),
     new_sites_smaller = []
     new_daggers_smaller = []
     new_weights_smaller = []
@@ -76,28 +79,43 @@ def move_daggers_left(sites_, daggers_, weights_, sectors_ = None):
 
         si = jnp.take_along_axis(sites_, i, 1)
         sj = jnp.take_along_axis(sites_, j, 1)
-        same = si==sj & do_move
 
         new_sites = move(i, j, sites_, mask=do_move)
         new_daggers = move(i, j, daggers_, mask=do_move)
         new_weights = weights_ * sign
 
-        new_sites2 = remove(i[do_move.ravel()], j[do_move.ravel()], sites_[do_move.ravel()])
-        new_daggers2 = remove(i[do_move.ravel()], j[do_move.ravel()], daggers_[do_move.ravel()])
-        new_weights2 = -(weights_ * sign)[do_move.ravel()]
+        same = ((si==sj) & do_move).ravel()
+        new_sites2 = remove(i[same], j[same], sites_[same])
+        new_daggers2 = remove(i[same], j[same], daggers_[same])
+        new_weights2 = -(weights_ * sign)[same]
         new_sites2, new_daggers2, new_weights2 = prune(new_sites2, new_daggers2, new_weights2)
         if len(new_sites2) > 0:
             new_sites_smaller.append(new_sites2)
             new_daggers_smaller.append(new_daggers2)
             new_weights_smaller.append(new_weights2)
+        # set var for next iteration
         sites_, daggers_, weights_ = prune(new_sites, new_daggers, new_weights)
+
     if len(new_sites_smaller) > 0:
         new_sites_smaller = np.concatenate(new_sites_smaller, axis=0)
         new_daggers_smaller = np.concatenate(new_daggers_smaller, axis=0)
         new_weights_smaller = np.concatenate(new_weights_smaller, axis=0)
+        # recursion; TODO collapse first and only run once for each size instead?
+        return (sites_, daggers_, weights_), *_move_daggers_left(new_sites_smaller, new_daggers_smaller, new_weights_smaller)
     else:
-        new_sites_smaller, new_daggers_smaller, new_weights_smaller = None, None, None
-    return (sites_, daggers_, weights_), (new_sites_smaller, new_daggers_smaller, new_weights_smaller)
+        return (sites_, daggers_, weights_),
+
+def move_daggers_left(t):
+    d = {}
+    for sdw in [x for v in t.values() for x in _move_daggers_left(*v)]:
+        k = sdw[0].shape[-1]
+        if sdw[-1].size > 0: # not empty
+            di = d.pop(k, None)
+            if di is None:
+                d[k] = sdw
+            else:
+               d[k] = tuple(np.concatenate([a,b], axis=0) for a, b in zip(di,sdw))
+    return d
 
 def swd_to_sparse(sites, daggers, weights, n_orbitals):
     n = daggers.shape[-1]
@@ -123,9 +141,10 @@ def extract_operators_normal_order(*swd, n_orbitals):
 
 
 
-#from netket.experimental.operator._pyscf_utils import _parity
-def to_desc_order(sites_, daggers_, weights_):
-
+def _to_desc_order(sites_, daggers_, weights_):
+    n = daggers_.shape[-1]
+    if n == 0:
+        return sites_, daggers_, weights_
     # check min and max do not over/underflow
     # TODO promote to signed / bigger dtype if necessary
     xl = sites_.min()-1
@@ -145,3 +164,31 @@ def to_desc_order(sites_, daggers_, weights_):
 
     # TODO also merge duplicates
     return prune(sites_desc, daggers_, weights_desc)
+
+def to_desc_order(t):
+    # assumes daggers are already left
+    # TODO sum duplicates
+    return {k: _to_desc_order(*v) for k,v in t.items()}
+
+
+def arrays_to_fermiop_terms(t):
+    terms = []
+    weights = []
+    for s,d,w in t.values():
+        terms = terms + np.concatenate([s[..., None],d[..., None]], axis=-1).tolist()
+        weights = weights + w.tolist()
+    return terms, weights
+
+def to_normal_order(t):
+    return to_desc_order(move_daggers_left(t))
+
+# test:
+# t = _fermiop_terms_to_arrays(ha.terms, ha.weights)
+# ha1 = FermionOperator2nd(hi, *arrays_to_fermiop_terms(t))
+# np.allclose(ha.to_dense(), ha1.to_dense())
+# t_left = move_daggers_left(t)
+# ha2 = FermionOperator2nd(hi, *arrays_to_fermiop_terms(t_left))
+# np.allclose(ha.to_dense(), ha2.to_dense())
+# t_normal = to_desc_order(t_left)
+# ha3 = FermionOperator2nd(hi, *arrays_to_fermiop_terms(t_normal))
+# np.allclose(ha.to_dense(), ha3.to_dense())
