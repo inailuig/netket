@@ -336,7 +336,9 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
                 # i > j because we made it normal order (with site shifted by N*spin) above
                 for ij in np.unique(sector[m_different], axis=0):
                     m = (sector == ij[None]).all(axis=-1) & m_different
-                    operators_different_sector[4][tuple(ij)] = swd_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
+                    o = swd_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
+                    # change convention; TODO make it consistent everywhere
+                    operators_different_sector[4][tuple(ij)] = -o.swapaxes(0,1).swapaxes(2,3)
             else:
                 raise NotImplementedError
 
