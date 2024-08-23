@@ -110,8 +110,8 @@ def _get_conn_padded_interaction_up_down(
     return xp_down, xp_up, mels
 
 
-@partial(jax.jit, static_argnames=("nelec", "use_symm"))
-def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True):
+@partial(jax.jit, static_argnames=("nelec",))
+def get_conn_padded_pnc_spin(_operator_data, x, nelec):
     n_spin_subsectors = len(nelec)
     xs = unpack_du(x, n_spin_subsectors)
     xs_diag = tuple(a[..., None, :] for a in xs)
@@ -139,23 +139,12 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True):
         for i in range(n_spin_subsectors):
             for j in range(i+1, n_spin_subsectors):
                 # here j>i
-                xi, xj = xs[i], xs[j]
-                nelectroni, nelectronj = nelec[i], nelec[j]
-
+                # further assume operator data is c_ijkl + c_jilk so that here we only need to sum  ρ > σ (i.e. σ=d, ρ=u)
                 *_, melsij = _get_conn_padded_interaction_up_down(
-                    nelectroni, nelectronj, xi, xj, *v
+                    nelec[i], nelec[j], xs[i], xs[j], *v
                 )
                 xp_diag = x[..., None, :]
-                # we use the symmetry in hijkl
-                if use_symm:
-                    # the udud term is equal to dudu and we can just compute one and multiply with 2
-                    mels_diag = mels_diag + 2 * melsij
-                else:
-                    *_, melsji = _get_conn_padded_interaction_up_down(
-                        nelectronj, nelectroni, xj, xi, *v
-                    )
-                    mels_diag = mels_diag + melsij + melsji
-
+                mels_diag = mels_diag + melsij
         xp_list = [xp_diag]
         mels_list = [mels_diag]
 
@@ -172,26 +161,13 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec, use_symm=True):
         for i in range(n_spin_subsectors):
             for j in range(i+1, n_spin_subsectors):
                 # here j>i
-                xi, xj = xs[i], xs[j]
-                nelectroni, nelectronj = nelec[i], nelec[j]
-
+                # further assume operator data is c_ijkl + c_jilk so that here we only need to sum  ρ > σ (i.e. σ=d, ρ=u)
                 xpi, xpj, melsij = _get_conn_padded_interaction_up_down(
-                    nelectroni, nelectronj, xi, xj, *v
+                    nelec[i], nelec[j], xs[i], xs[j], *v
                 )
                 xpij = pack_du(*xs_diag[:i], xpi, *xs_diag[i+1:j], xpj, *xs_diag[j+1:])
                 xp_list.append(xpij)
-                if use_symm:
-                    # we use the symmetry in hijkl
-                    # the udud term is equal to dudu and we can just compute one and multiply with 2
-                    mels_list.append(2 * melsij)
-                else:
-                    mels_list.append(melsij)
-                    xpj, xpi, melsji = _get_conn_padded_interaction_up_down(
-                        nelectronj, nelectroni, xj, xi, *v
-                    )
-                    xpji = pack_du(*xs_diag[:i], xpi, *xs_diag[i+1:j], xpj, *xs_diag[j+1:])
-                    xp_list.append(xpji)
-                    mels_list.append(melsji)
+                mels_list.append(melsij)
     if len(xp_list) > 0:
         xp = jnp.concatenate(xp_list, axis=-2).astype(dtype)
         mels = jnp.concatenate(mels_list, axis=-1)
@@ -211,7 +187,9 @@ def _sparse_arrays_to_coords_data_spin(operators, cutoff=1e-11):
     hijkl_sparse = ops.get(4, None)
     if hijkl_sparse is not None:
         ops[4] = to_desc_order_sparse(hijkl_sparse, cutoff)
-        v = _sparse_arrays_to_coords_data_dict({4: hijkl_sparse})[4]
+        # add c_ijkl + c_jilk
+        # Σ_{σ!=ρ} c_ijkl  c_iσ^† c_jρ^† c_kρ c_lσ =  Σ_{σ>ρ} (c_ijkl + c_jilk) c_iσ^† c_jρ^† c_kρ c_lσ
+        v = _sparse_arrays_to_coords_data_dict({4: hijkl_sparse + hijkl_sparse.swapaxes(0,1).swapaxes(2,3)})[4]
         coords_data_mixed = v[0][:, [0, 1, 3, 2]], *v[1:]  # swap ijkl->ijlk
     else:
         coords_data_mixed = None
@@ -242,7 +220,6 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
     """
     _hilbert: SpinOrbitalFermions = struct.field(pytree_node=False)
     _operator_data: PyTree
-    _use_symm: bool = struct.field(pytree_node=False, default=False) # c_ijkl == c_jilk
 
     @property
     def dtype(self):
@@ -260,9 +237,7 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
         return mels.shape[-1]
 
     def get_conn_padded(self, x):
-        return get_conn_padded_pnc_spin(
-            self._operator_data, x, self._hilbert.n_fermions_per_spin, self._use_symm,
-        )
+        return get_conn_padded_pnc_spin(self._operator_data, x, self._hilbert.n_fermions_per_spin)
 
     @classmethod
     def from_coords_data(cls, hilbert, coords_data, coords_data_mixed):
@@ -290,7 +265,7 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
         hijkl = hijkl * (jnp.abs(hijkl) > cutoff)
         hijkl_sparse = 0.5 * sparse.COO.from_numpy(hijkl)
 
-        return cls.from_sparse_arrays(hi, [const, hij_sparse, hijkl_sparse], cutoff=cutoff).replace(_use_symm=True)
+        return cls.from_sparse_arrays(hi, [const, hij_sparse, hijkl_sparse], cutoff=cutoff)
 
     @classmethod
     def from_fermiop(cls, ha, **kwargs):
