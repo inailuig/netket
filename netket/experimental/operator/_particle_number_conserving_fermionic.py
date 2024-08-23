@@ -15,6 +15,7 @@ from netket.experimental.hilbert import SpinOrbitalFermions
 from netket.utils.types import PyTree
 
 from ._fermion_operator_2nd_jax import FermionOperator2ndJax
+from ._normal_order_utils import to_normal_order
 
 from netket.experimental.operator._pyscf_utils import to_desc_order_sparse
 
@@ -407,8 +408,9 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
 
     @classmethod
     def from_fermiop(cls, ha, **kwargs):
-        ha = ha.to_normal_order()
+        # ha = ha.to_normal_order()
         t = _fermiop_terms_to_arrays(ha.terms, ha.weights)
+        t = to_normal_order(t)
         terms = {k: (v[0], v[2]) for k, v in t.items()} # drop daggers
         return cls.from_coords_data_normal_order(ha.hilbert, terms, **kwargs)
 
