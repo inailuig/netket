@@ -194,6 +194,7 @@ def _sparse_arrays_to_coords_data_spin(operators, cutoff=1e-11):
         # add c_ijkl + c_jilk
         # Σ_{σ!=ρ} c_ijkl  c_iσ^† c_jρ^† c_kρ c_lσ =  Σ_{σ>ρ} (c_ijkl + c_jilk) c_iσ^† c_jρ^† c_kρ c_lσ
         v = _sparse_arrays_to_coords_data_dict({4: hijkl_sparse + hijkl_sparse.swapaxes(0,1).swapaxes(2,3)})[4]
+        # change convention; TODO make it consistent everywhere
         coords_data_mixed = v[0][:, [0, 1, 3, 2]], *v[1:]  # swap ijkl->ijlk
     else:
         coords_data_mixed = None
