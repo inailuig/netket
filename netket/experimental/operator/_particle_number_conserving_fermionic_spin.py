@@ -269,26 +269,6 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
         coords_data_mixed = _sparse_arrays_to_coords_data_dict(operators_different).get(4, None)
         return cls.from_coords_data(hilbert, coords_data, coords_data_mixed)
 
-def _sparse_arrays_to_coords_data_spin(operators, operators_different=None, cutoff=1e-11):
-    # operators = [const, hij, hijkl]
-    # ops = {0: const, 2: hij_sparse, 4: hijkl_sparse}
-    operators_same = _collect_ops(operators)
-
-    coords_data_mixed = None
-
-    if operators_different is None:
-        hijkl_sparse = ops.get(4, None)
-        if hijkl_sparse is not None:
-            ops[4] = to_desc_order_sparse(hijkl_sparse, cutoff)
-            # add c_ijkl + c_jilk
-            # Σ_{σ!=ρ} c_ijkl  c_iσ^† c_jρ^† c_kρ c_lσ =  Σ_{σ>ρ} (c_ijkl + c_jilk) c_iσ^† c_jρ^† c_kρ c_lσ
-            v = _sparse_arrays_to_coords_data_dict({4: hijkl_sparse + hijkl_sparse.swapaxes(0,1).swapaxes(2,3)})[4]
-            coords_data_mixed = v[0][:, [0, 1, 3, 2]], *v[1:]  # swap ijkl->ijlk
-    else:
-
-
-    return coords_data, coords_data_mixed
-
     @classmethod
     def from_pyscf_molecule(cls, mol, mo_coeff, cutoff=1e-11):
         # TODO eventually deprecate this in favour of pyscf.py ?
