@@ -257,8 +257,6 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
     def from_sparse_arrays(cls, hilbert, operators, **kwargs):
         # implementation for Σ_ijklσρ V_ijkl  c_iσ^† c_jρ^† c_kρ c_lσ
         # operators is a list of sparse matrices
-        if operators_different is None:
-            operators_different = operators_same
         coords_data, coords_data_mixed = _sparse_arrays_to_coords_data_spin(operators, **kwargs)
         return cls.from_coords_data(hilbert, coords_data, coords_data_mixed)
 
