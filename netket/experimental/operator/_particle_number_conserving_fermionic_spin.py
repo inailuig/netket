@@ -26,7 +26,7 @@ from ._particle_number_conserving_fermionic import (
 )
 from ._pyscf_utils import compute_pyscf_integrals, to_desc_order_sparse
 
-from ._normal_order_utils import to_normal_order, _split_spin_sectors, swd_to_sparse
+from ._normal_order_utils import *
 
 # TODO do this in hilbert
 @partial(jax.jit, static_argnames='n_spin_subsectors')
@@ -180,6 +180,52 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
         mels = jnp.zeros(xp.shape[:-1]) # TODO dtype?
     return xp, mels
 
+def _split_spin_sectors(sites, n_orbitals, n_spin_subsectors):
+    n_ops = sites.shape[1]
+    if n_ops == 0:
+        return sites, np.zeros_like(sites)
+    L = np.arange(n_spin_subsectors)*n_orbitals
+    R = np.arange(1, n_spin_subsectors+1)*n_orbitals
+    sectors_mask = ((sites[...,None] >= L) & (sites[...,None] < R)) # n_terms x n_ops x n_spin_subsectors
+    sectors = np.einsum('...i,i', sectors_mask, np.arange(n_spin_subsectors)).astype(np.int32)
+    sites = sites - sectors * n_orbitals
+    return sites, sectors
+
+def _fermiop_terms_to_arrays_spin(terms, weights, n_orbitals, n_spin_subsectors):
+    d = _fermiop_terms_to_arrays(terms, weights)
+    # { size : (sites, sectors, daggers, weights) }
+    return {k: (*_split_spin_sectors(v[0], n_orbitals, n_spin_subsectors), *v[1:]) for k, v in d.items()}
+
+def swd_to_sparse(sites, daggers, weights, n_orbitals):
+    n = daggers.shape[-1]
+    assert n%2 == 0
+    assert (daggers[:, :n//2] == 1).all()
+    assert (daggers[:, n//2:] == 0).all()
+    # TODO cutoff?
+    return sparse.COO(sites.T, weights, shape=(n_orbitals,)*n)
+
+def extract_operators_normal_order(*swd, n_orbitals):
+    operators = []
+    while True:
+        swd_daggers_left, swd = move_daggers_left(*swd)
+        swd_daggers_left = to_desc_order(*swd_daggers_left)
+        o = swd_to_sparse(*swd_daggers_left, n_orbitals)
+        operators.append(o)
+        if swd[0] is None:
+            break
+        elif swd[0].shape[-1] == 0:
+            operators.append(swd[2].sum())
+            break
+    return operators
+
+
+def arrays_to_fermiop_terms(t):
+    terms = []
+    weights = []
+    for s,d,w in t.values():
+        terms = terms + np.concatenate([s[..., None],d[..., None]], axis=-1).tolist()
+        weights = weights + w.tolist()
+    return terms, weights
 
 def _sparse_arrays_to_coords_data_spin(operators, cutoff=1e-11):
     # operators = [const, hij, hijkl]

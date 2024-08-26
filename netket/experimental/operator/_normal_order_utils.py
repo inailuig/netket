@@ -3,22 +3,6 @@ from functools import partial
 
 from netket.experimental.operator._pyscf_utils import _parity
 
-def _split_spin_sectors(sites, n_orbitals, n_spin_subsectors):
-    n_ops = sites.shape[1]
-    if n_ops == 0:
-        return sites, np.zeros_like(sites)
-    L = np.arange(n_spin_subsectors)*n_orbitals
-    R = np.arange(1, n_spin_subsectors+1)*n_orbitals
-    sectors_mask = ((sites[...,None] >= L) & (sites[...,None] < R)) # n_terms x n_ops x n_spin_subsectors
-    sectors = np.einsum('...i,i', sectors_mask, np.arange(n_spin_subsectors)).astype(np.int32)
-    sites = sites - sectors * n_orbitals
-    return sites, sectors
-
-def _fermiop_terms_to_arrays_spin(terms, weights, n_orbitals, n_spin_subsectors):
-    d = _fermiop_terms_to_arrays(terms, weights)
-    # { size : (sites, sectors, daggers, weights) }
-    return {k: (*_split_spin_sectors(v[0], n_orbitals, n_spin_subsectors), *v[1:]) for k, v in d.items()}
-
 
 def prune(sites, daggers, weights):
     # remove ci ci and ci+ci+ on the same site i
@@ -50,8 +34,6 @@ def remove(i, j, x):
     x2 = np.roll(x, -2, axis=-1)
     return (maskl * x + mask_middle * x1 + maskr * x2)[..., :-2]
 
-
-import sparse
 
 def _move_daggers_left(sites_, daggers_, weights_):
     n = daggers_.shape[-1]
@@ -115,29 +97,6 @@ def move_daggers_left(t):
                d[k] = tuple(np.concatenate([a,b], axis=0) for a, b in zip(di,sdw))
     return d
 
-def swd_to_sparse(sites, daggers, weights, n_orbitals):
-    n = daggers.shape[-1]
-    assert n%2 == 0
-    assert (daggers[:, :n//2] == 1).all()
-    assert (daggers[:, n//2:] == 0).all()
-    # TODO cutoff?
-    return sparse.COO(sites.T, weights, shape=(n_orbitals,)*n)
-
-def extract_operators_normal_order(*swd, n_orbitals):
-    operators = []
-    while True:
-        swd_daggers_left, swd = move_daggers_left(*swd)
-        swd_daggers_left = to_desc_order(*swd_daggers_left)
-        o = swd_to_sparse(*swd_daggers_left, n_orbitals)
-        operators.append(o)
-        if swd[0] is None:
-            break
-        elif swd[0].shape[-1] == 0:
-            operators.append(swd[2].sum())
-            break
-    return operators
-
-
 
 def _to_desc_order(sites_, daggers_, weights_):
     n = daggers_.shape[-1]
@@ -167,15 +126,6 @@ def to_desc_order(t):
     # assumes daggers are already left
     # TODO sum duplicates
     return {k: _to_desc_order(*v) for k,v in t.items()}
-
-
-def arrays_to_fermiop_terms(t):
-    terms = []
-    weights = []
-    for s,d,w in t.values():
-        terms = terms + np.concatenate([s[..., None],d[..., None]], axis=-1).tolist()
-        weights = weights + w.tolist()
-    return terms, weights
 
 def to_normal_order(t):
     return to_desc_order(move_daggers_left(t))
