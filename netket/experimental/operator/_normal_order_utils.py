@@ -1,5 +1,3 @@
-import jax
-import jax.numpy as jnp
 import numpy as np
 from functools import partial
 
@@ -8,11 +6,11 @@ from netket.experimental.operator._pyscf_utils import _parity
 def _split_spin_sectors(sites, n_orbitals, n_spin_subsectors):
     n_ops = sites.shape[1]
     if n_ops == 0:
-        return sites, jnp.zeros_like(sites)
+        return sites, np.zeros_like(sites)
     L = np.arange(n_spin_subsectors)*n_orbitals
     R = np.arange(1, n_spin_subsectors+1)*n_orbitals
     sectors_mask = ((sites[...,None] >= L) & (sites[...,None] < R)) # n_terms x n_ops x n_spin_subsectors
-    sectors = jnp.einsum('...i,i', sectors_mask, jnp.arange(n_spin_subsectors)).astype(np.int32)
+    sectors = np.einsum('...i,i', sectors_mask, np.arange(n_spin_subsectors)).astype(np.int32)
     sites = sites - sectors * n_orbitals
     return sites, sectors
 
@@ -29,13 +27,13 @@ def prune(sites, daggers, weights):
 
 def move(i, j, x, mask=None):
     n = x.shape[-1]
-    a = jnp.arange(n)[None]
+    a = np.arange(n)[None]
     # move i after j
     masklr = (a<i) | (a>j)
     maskj = a == j
     mask_middle = ~(masklr | maskj)
     x1 = np.roll(x, -1, axis=-1)
-    xi = jnp.take_along_axis(x, i, 1)
+    xi = np.take_along_axis(x, i, 1)
     res = masklr * x + mask_middle * x1 + maskj * xi
     if mask is None:
         return res
@@ -43,7 +41,7 @@ def move(i, j, x, mask=None):
 
 def remove(i, j, x):
     n = x.shape[-1]
-    a = jnp.arange(n)[None]
+    a = np.arange(n)[None]
     # remove i and j
     maskl = a<i
     maskr = a>j-2
@@ -63,7 +61,7 @@ def _move_daggers_left(sites_, daggers_, weights_):
     new_daggers_smaller = []
     new_weights_smaller = []
     while True:
-        a = jnp.arange(n)[None]
+        a = np.arange(n)[None]
         # find leftmost c
         i = np.argmin(daggers_,axis=1, keepdims=True)
         # find next dagger
@@ -77,8 +75,8 @@ def _move_daggers_left(sites_, daggers_, weights_):
 
         sign = 1-2*(((j-i)*do_move)%2).ravel()
 
-        si = jnp.take_along_axis(sites_, i, 1)
-        sj = jnp.take_along_axis(sites_, j, 1)
+        si = np.take_along_axis(sites_, i, 1)
+        sj = np.take_along_axis(sites_, j, 1)
 
         new_sites = move(i, j, sites_, mask=do_move)
         new_daggers = move(i, j, daggers_, mask=do_move)
