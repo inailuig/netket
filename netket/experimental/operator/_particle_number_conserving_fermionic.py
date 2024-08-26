@@ -16,6 +16,7 @@ from netket.utils.types import PyTree
 
 from ._fermion_operator_2nd_jax import FermionOperator2ndJax
 from ._normal_order_utils import to_normal_order
+from ._pyscf_utils import TV_from_pyscf_molecule
 
 from netket.experimental.operator._pyscf_utils import to_desc_order_sparse
 
@@ -423,3 +424,10 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
                 terms = terms + t.tolist()
                 weights = weights + w.tolist()
         return cls(self._hilbert, terms, weights)
+
+    @classmethod
+    def from_pyscf_molecule(cls, mol, mo_coeff, cutoff=1e-11, **kwargs):
+        n_orbitals = int(mol.nao)
+        hi = SpinOrbitalFermions(n_orbitals, s=1 / 2, n_fermions_per_spin=mol.nelec)
+        E_nuc, Tij, Vijkl = TV_from_pyscf_molecule(mol, mo_coeff, cutoff=cutoff)
+        return cls.from_sparse_arrays_normal_order(hi, [E_nuc, Tij, 0.5 * Vijkl], **kwargs)
