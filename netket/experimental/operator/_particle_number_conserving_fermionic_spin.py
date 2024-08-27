@@ -144,10 +144,10 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
             raise NotImplementedError
         # TODO make sectors a jax array and use jax loop here to compile only once
         for i,j in sectors:
-            assert j > i # here j>i
+            assert i>j # here i>j
             # e.g. take operator data to be c_ijkl + c_jilk so that here we only need to sum  ρ > σ (i.e. σ=d, ρ=u)
             *_, melsij = _get_conn_padded_interaction_up_down(
-                nelec[i], nelec[j], xs[i], xs[j], *v
+                nelec[j], nelec[i], xs[j], xs[i], *v
             )
             mels_diag = mels_diag + melsij
             xp_diag = x[..., None, :]
@@ -169,12 +169,12 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
         if k != 4:
             raise NotImplementedError
         for i,j in sectors:
-            assert j > i # here j>i
+            assert i>j # here i>j
             # e.g. take operator data to be c_ijkl + c_jilk so that here we only need to sum  ρ > σ (i.e. σ=d, ρ=u)
-            xpi, xpj, melsij = _get_conn_padded_interaction_up_down(
-                nelec[i], nelec[j], xs[i], xs[j], *v
+            xpj, xpi, melsij = _get_conn_padded_interaction_up_down(
+                nelec[j], nelec[i], xs[j], xs[i], *v
             )
-            xpij = pack_du(*xs_diag[:i], xpi, *xs_diag[i+1:j], xpj, *xs_diag[j+1:])
+            xpij = pack_du(*xs_diag[:j], xpj, *xs_diag[j+1:i], xpi, *xs_diag[i+1:])
             xp_list.append(xpij)
             mels_list.append(melsij)
     if len(xp_list) > 0:
@@ -343,7 +343,7 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
         operators_sector = {}
         sectors0 = ()
         sectors1 = tuple(np.arange(hilbert.n_spin_subsectors).tolist())
-        sectors2 = tuple(map(tuple,np.array(np.triu_indices(hilbert.n_spin_subsectors, 1)).T.tolist()))
+        sectors2 = tuple(map(tuple,np.array(np.tril_indices(hilbert.n_spin_subsectors, -1)).T.tolist()))
         for k, v in ops.items():
             if k == 0:
                 operators_sector[0, sectors0] = v
@@ -360,7 +360,6 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
 
     @classmethod
     def from_pyscf_molecule(cls, mol, mo_coeff, cutoff=1e-11):
-        # TODO eventually deprecate this in favour of pyscf.py ?
         n_orbitals = int(mol.nao)
         hilbert = SpinOrbitalFermions(n_orbitals, s=1 / 2, n_fermions_per_spin=mol.nelec)
 
@@ -448,10 +447,10 @@ def _tno_sector_to_operators_sector(tno_sector, n_spin_subsectors, n_orbitals, c
             # i > j because we made it normal order (with site shifted by N*spin) above
             for ij in np.unique(sector[m_different], axis=0):
                 m = (sector == ij[None]).all(axis=-1) & m_different
-                o = swd_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
-                # change convention; TODO make it consistent everywhere
-                o = -o.swapaxes(0,1).swapaxes(2,3)
-                _insert_append(operators_sector, k, (tuple(ij)[::-1],), o, cutoff)
+                # minus sign because in the operator (_get_conn_padded_interaction_up_down) we assume it's swaped to (assuming σ>ρ)
+                # cσ^† cσ cρ^† cρ = - cσ^† cρ^† cσ cρ
+                o = - swd_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
+                _insert_append(operators_sector, k, (tuple(ij),), o, cutoff)
         else:
             raise NotImplementedError
     return operators_sector
