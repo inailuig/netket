@@ -185,21 +185,33 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
         mels = jnp.zeros(xp.shape[:-1]) # TODO dtype?
     return xp, mels
 
-def _split_spin_sectors(sites, n_orbitals, n_spin_subsectors):
+def _split_spin_sectors(sites, daggers, weights, n_orbitals, n_spin_subsectors):
     n_ops = sites.shape[1]
     if n_ops == 0:
-        return sites, np.zeros_like(sites)
+        return sites, np.zeros_like(sites), daggers, weights
     L = np.arange(n_spin_subsectors)*n_orbitals
     R = np.arange(1, n_spin_subsectors+1)*n_orbitals
     sectors_mask = ((sites[...,None] >= L) & (sites[...,None] < R)) # n_terms x n_ops x n_spin_subsectors
     sectors = np.einsum('...i,i', sectors_mask, np.arange(n_spin_subsectors)).astype(np.int32)
     sites = sites - sectors * n_orbitals
-    return sites, sectors
+    return sites, sectors, daggers, weights
+
+def split_spin_sectors(d, n_orbitals, n_spin_subsectors):
+    # input: { size : (sites, daggers, weights) }
+    # output: { size : (sites, sectors, daggers, weights) }
+    return {k: _split_spin_sectors(*v, n_orbitals, n_spin_subsectors) for k, v in d.items()}
+
+def _merge_spin_sectors(sites, sectors, daggers, weights, n_orbitals):
+    return sites + sectors * n_orbitals, daggers, weights
+
+def merge_spin_sectors(d, n_orbitals):
+    # input: { size : (sites, sectors, daggers, weights) }
+    # output: { size : (sites, daggers, weights) }
+    return {k: _merge_spin_sectors(*v, n_orbitals) for k, v in d.items()}
 
 def _fermiop_terms_to_arrays_spin(terms, weights, n_orbitals, n_spin_subsectors):
-    d = _fermiop_terms_to_arrays(terms, weights)
-    # { size : (sites, sectors, daggers, weights) }
-    return {k: (*_split_spin_sectors(v[0], n_orbitals, n_spin_subsectors), *v[1:]) for k, v in d.items()}
+    # output: { size : (sites, sectors, daggers, weights) }
+    return split_spin_sectors(_fermiop_terms_to_arrays(terms, weights), n_orbitals, n_spin_subsectors)
 
 def swd_to_sparse(sites, daggers, weights, n_orbitals):
     n = daggers.shape[-1]
@@ -360,25 +372,43 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
         return cls.from_sparse_arrays_all_sectors(hilbert, [const, hij_sparse, hijkl_sparse], cutoff=cutoff)
 
     @classmethod
+    def from_ssdw(cls, hilbert, t, cutoff=1e-11):
+        # t: { size : (sites, sectors, daggers, weights) }
+        # arbitrary order of sites, sectors, and daggers
+        # is internally converted to the right order for the operator
+        n_orbitals = hilbert.n_orbitals
+        n_spin_subsectors = hilbert.n_spin_subsectors
+        tno = _to_tno_sector(t, n_spin_subsectors, n_orbitals)
+        operators_sector = _tno_sector_to_operators_sector(tno, n_spin_subsectors, n_orbitals, cutoff=cutoff)
+        return cls.from_sparse_arrays(hilbert, operators_sector)
+
+    @classmethod
     def from_fermiop(cls, ha, cutoff=1e-11):
-        operators_sector = fermiop_to_operators_sector(ha, cutoff=cutoff)
-        return cls.from_sparse_arrays(ha.hilbert, operators_sector)
+        hilbert = ha.hilbert
+        n_orbitals = hilbert.n_orbitals
+        n_spin_subsectors = hilbert.n_spin_subsectors
+        t = _fermiop_terms_to_arrays_spin(ha.terms, ha.weights, n_orbitals, n_spin_subsectors)
+        return cls.from_ssdw(hilbert, t, cutoff=cutoff)
 
 
 
-def _insert_append(d, k, s, o, cutoff):
-    # check if an element with the same matrix but different sectors exist
-    # if yes append to the list of sectors
-    # else insert new element into the dict
-    for (k2, s2), o2 in d.items():
-        # and same number of sectors, same number of fermionic operators, same matrix (up to cutoff)
-        if ((s==() and s2 == ()) or (len(s2)>0 and len(s)>0 and  _len(s2[0]) == _len(s[0]))) and k==k2 and sparse.abs(o-o2).max() < cutoff :
-            d[k, s2+s] = d.pop((k2, s2))
-            break
-    else:
-        d[k, s] = o
+def _to_tno_sector(t, n_spin_subsectors, n_orbitals):
+    # convert to normal order with higher sector to the left
+    return split_spin_sectors(to_normal_order(merge_spin_sectors(t, n_orbitals)), n_orbitals, n_spin_subsectors)
 
-def tno_sector_to_operators_sector(tno_sector, n_spin_subsectors, n_orbitals, cutoff=1e-11):
+def _tno_sector_to_operators_sector(tno_sector, n_spin_subsectors, n_orbitals, cutoff=1e-11):
+
+    def _insert_append(d, k, s, o, cutoff):
+        # check if an element with the same matrix but different sectors exist
+        # if yes append to the list of sectors
+        # else insert new element into the dict
+        for (k2, s2), o2 in d.items():
+            # and same number of sectors, same number of fermionic operators, same matrix (up to cutoff)
+            if ((s==() and s2 == ()) or (len(s2)>0 and len(s)>0 and  _len(s2[0]) == _len(s[0]))) and k==k2 and sparse.abs(o-o2).max() < cutoff :
+                d[k, s2+s] = d.pop((k2, s2))
+                break
+        else:
+            d[k, s] = o
 
     operators_sector = {}
 
@@ -425,19 +455,3 @@ def tno_sector_to_operators_sector(tno_sector, n_spin_subsectors, n_orbitals, cu
         else:
             raise NotImplementedError
     return operators_sector
-
-def fermiop_to_tno_sector(ha):
-    hi = ha.hilbert
-    n_orbitals = hi.n_orbitals
-    n_spin_subsectors = hi.n_spin_subsectors
-    t = _fermiop_terms_to_arrays(ha.terms, ha.weights)
-    tno = to_normal_order(t)
-    tno_sector = {k: (*_split_spin_sectors(v[0], n_orbitals, n_spin_subsectors), *v[1:]) for k, v in tno.items()}
-    return tno_sector
-
-def fermiop_to_operators_sector(ha, cutoff=1e-11):
-    hi = ha.hilbert
-    n_orbitals = hi.n_orbitals
-    n_spin_subsectors = hi.n_spin_subsectors
-    tno_sector = fermiop_to_tno_sector(ha)
-    return tno_sector_to_operators_sector(tno_sector, n_spin_subsectors, n_orbitals, cutoff=cutoff)
