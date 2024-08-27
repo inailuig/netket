@@ -262,7 +262,7 @@ def _to_fermiop_helper(index_array, create_array, weight_array):
     return terms, weights
 
 # TODO merge this with fermionoperator2nd prepare_terms_list
-def _fermiop_terms_to_arrays(terms, weights):
+def _fermiop_terms_to_sites_daggers_weights(terms, weights):
     out = {}
     for t, w in zip(terms, weights):
         if len(t) == 0:  # constant
@@ -411,7 +411,7 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
     @classmethod
     def from_fermiop(cls, ha, **kwargs):
         # ha = ha.to_normal_order()
-        t = _fermiop_terms_to_arrays(ha.terms, ha.weights)
+        t = _fermiop_terms_to_sites_daggers_weights(ha.terms, ha.weights)
         t = to_normal_order(t)
         terms = {k: (v[0], v[2]) for k, v in t.items()} # drop daggers
         return cls.from_coords_data_normal_order(ha.hilbert, terms, **kwargs)
