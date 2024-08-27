@@ -319,7 +319,7 @@ def _prepare_operator_data_from_coords_data_dict(
             data_diag[k] = prepare_data_diagonal(*sw_diag, n_orbitals, **kwargs)
         if len(sw_offdiag[-1]) > 0:
             data_offdiag[k] = prepare_data(*sw_offdiag, n_orbitals, **kwargs)
-    data = data_diag, data_offdiag
+    data = {'diag': data_diag, 'offdiag':data_offdiag}
     return data
 
 
@@ -341,13 +341,13 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
         mels_list = []
         xp_diag = None
         mels_diag = 0
-        for k, v in self._operator_data[0].items():
+        for k, v in self._operator_data['diag'].items():
             xp, mels = _get_conn_padded(self._hilbert.n_fermions, x, *v)
             xp_diag = xp
             mels_diag = mels_diag + mels
             xp_list = [xp_diag]
             mels_list = [mels_diag]
-        for k, v in self._operator_data[1].items():
+        for k, v in self._operator_data['offdiag'].items():
             xp, mels = _get_conn_padded(self._hilbert.n_fermions, x, *v)
             xp_list.append(xp)
             mels_list.append(mels)
