@@ -369,8 +369,8 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
 
     @property
     def is_hermitian(self):
-        return NotImplemented
-        # return True
+        # TODO actually check it is
+        return True
 
     @classmethod
     def from_coords_data_normal_order(cls, hilbert, coords_data_dict, **kwargs):

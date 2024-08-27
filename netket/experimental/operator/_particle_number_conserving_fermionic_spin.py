@@ -17,7 +17,6 @@ from ._particle_number_conserving_fermionic import (
     _get_conn_padded,
     _jw_kernel,
     _prepare_operator_data_from_coords_data_dict,
-    _sparse_arrays_to_coords_data_dict,
     split_diag_offdiag,
     prepare_data,
     prepare_data_diagonal,
@@ -129,11 +128,7 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
     # TODO make sectors a jax array and use jax loop here to compile only once
     # (requires nelec to be the same for all sectors)
 
-    for k, v in _operator_data['diag'].items():
-        if isinstance(k, tuple):
-            k, sectors = k
-        else: # backward compat; no sectors means all of them
-            sectors = () if k == 0 else np.arange(n_spin_subsectors).tolist()
+    for (k, sectors), v in _operator_data['diag'].items():
 
         if k ==0:
             assert sectors == ()
@@ -142,13 +137,9 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
         for i in sectors:
             _, melsi = _get_conn_padded(nelec[i], xs[i], *v)
             mels_diag = mels_diag + melsi
+            xp_diag = x[..., None, :]
 
-
-    for k, v in _operator_data['mixed_diag'].items():
-        if isinstance(k, tuple):
-            k, sectors = k
-        else: # backward compat; no sectors means all of them
-            sectors = np.array(np.triu_indices(n_spin_subsectors, 1)).T.tolist()
+    for (k, sectors), v in _operator_data['mixed_diag'].items():
         if k != 4:
             raise NotImplementedError
         # TODO make sectors a jax array and use jax loop here to compile only once
@@ -159,18 +150,14 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
                 nelec[i], nelec[j], xs[i], xs[j], *v
             )
             mels_diag = mels_diag + melsij
+            xp_diag = x[..., None, :]
 
-    # always add diag element, even if it's zero; TODO only add if needed?
-    xp_diag = x[..., None, :]
-    xp_list = [xp_diag]
-    mels_list = [mels_diag]
+    # TODO optionally always add zero diagonal?
+    if xp_diag is not None:
+        xp_list = [xp_diag]
+        mels_list = [mels_diag]
 
-    for k, v in _operator_data['offdiag'].items():
-        if isinstance(k, tuple):
-            k, sectors = k
-        else: # backward compat; no sectors means all of them
-            sectors = np.arange(n_spin_subsectors).tolist()
-
+    for (k, sectors), v in _operator_data['offdiag'].items():
         # TODO make sectors a jax array and use jax loop here to compile only once
         for i in sectors:
             xpi, melsi = _get_conn_padded(nelec[i], xs[i], *v)
@@ -178,11 +165,7 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
             xp_list.append(xpi)
             mels_list.append(melsi)
 
-    for k, v in _operator_data['mixed_offdiag'].items():
-        if isinstance(k, tuple):
-            k, sectors = k
-        else: # backward compat; no sectors means all of them
-            sectors = np.array(np.triu_indices(n_spin_subsectors, 1)).T.tolist()
+    for (k, sectors), v in _operator_data['mixed_offdiag'].items():
         if k != 4:
             raise NotImplementedError
         for i,j in sectors:
@@ -249,50 +232,46 @@ def arrays_to_fermiop_terms(t):
         weights = weights + w.tolist()
     return terms, weights
 
-def _sparse_arrays_to_coords_data_spin(operators, cutoff=1e-11):
-    # operators = [const, hij, hijkl]
-    # ops = {0: const, 2: hij_sparse, 4: hijkl_sparse}
-    ops = _collect_ops(operators)
-    for k in ops.keys():
-        if k not in (0,2,4):
-            raise NotImplementedError
-    hijkl_sparse = ops.get(4, None)
-    if hijkl_sparse is not None:
-        ops[4] = to_desc_order_sparse(hijkl_sparse, cutoff)
-        # add c_ijkl + c_jilk
-        # Σ_{σ!=ρ} c_ijkl  c_iσ^† c_jρ^† c_kρ c_lσ =  Σ_{σ>ρ} (c_ijkl + c_jilk) c_iσ^† c_jρ^† c_kρ c_lσ
-        v = _sparse_arrays_to_coords_data_dict({4: hijkl_sparse + hijkl_sparse.swapaxes(0,1).swapaxes(2,3)})[4]
-        # change convention; TODO make it consistent everywhere
-        coords_data_mixed = v[0][:, [0, 1, 3, 2]], *v[1:]  # swap ijkl->ijlk
-    else:
-        coords_data_mixed = None
-    coords_data = _sparse_arrays_to_coords_data_dict(ops)
-    return coords_data, coords_data_mixed
+# version for the one with sectors for the si, taking a dict
+def _sparse_arrays_to_coords_data_dict2(ops):
+    def _unpack(k, v):
+        if isinstance(k, tuple):
+            k, _ = k
+        if k == 0:
+            return np.zeros((1, 0), dtype=int), np.array([v])
+        else:
+            return v.coords.T, v.data
+    return {k: _unpack(k, v) for k, v in ops.items()}
 
-def prepare_operator_data_from_coords_data_dict_spin(coords_data, coords_data_mixed, n_orbitals):
-    operator_data = _prepare_operator_data_from_coords_data_dict(coords_data, n_orbitals)
+
+def prepare_operator_data_from_coords_data_dict_spin(coords_data_sectors, n_orbitals):
+    # version with sectors
+    _cond = lambda s: s==() or _len(s[0]) == 1
+    coords_data_same = {(k,s): v for (k, s), v in coords_data_sectors.items() if _cond(s)}
+    coords_data_mixed = {(k,s): v for (k, s), v in coords_data_sectors.items() if not _cond(s)}
+
+    operator_data = _prepare_operator_data_from_coords_data_dict(coords_data_same, n_orbitals)
     # process mixed terms
     data_diag_mixed = {}
     data_offdiag_mixed = {}
-    if coords_data_mixed is not None:
-        sw_diag, sw_offdiag = split_diag_offdiag(*coords_data_mixed)
+    for k, v in coords_data_mixed.items():
+        sw_diag, sw_offdiag = split_diag_offdiag(*v)
         if len(sw_diag[-1]) > 0:
-            data_diag_mixed = {4: prepare_data_diagonal(*sw_diag, n_orbitals, _sparse=False)}
+            data_diag_mixed[k] = prepare_data_diagonal(*sw_diag, n_orbitals, _sparse=False)
         if len(sw_offdiag[-1]) > 0:
-            data_offdiag_mixed = {4: prepare_data(*sw_offdiag, n_orbitals, _sparse=False)}
+            data_offdiag_mixed[k] = prepare_data(*sw_offdiag, n_orbitals, _sparse=False)
     operator_data = {**operator_data, 'mixed_diag': data_diag_mixed, 'mixed_offdiag': data_offdiag_mixed}
     return operator_data
 
-def add_all_sectors(operator_data, n_spin_subsectors):
-    def _add(key, d):
-        if 'mixed' in key:
-            sectors = tuple(map(tuple,np.array(np.triu_indices(n_spin_subsectors, 1)).T.tolist()))
-        else:
-            sectors = tuple(np.arange(n_spin_subsectors).tolist())
-        return {(k, () if k==0 else sectors):v for k, v in d.items()}
-    return {key: _add(key,d) for key, d in operator_data.items()}
-
 # TODO generalize it to >4 fermionic operators
+
+
+def _len(s):
+    if isinstance(s, tuple):
+        return len(s)
+    else:
+        return 1
+
 
 @struct.dataclass
 class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
@@ -308,6 +287,7 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
 
     @property
     def is_hermitian(self):
+        # TODO actually check it is
         return True
 
     @property
@@ -321,131 +301,143 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
         return get_conn_padded_pnc_spin(self._operator_data, x, self._hilbert.n_fermions_per_spin)
 
     @classmethod
-    def from_coords_data(cls, hilbert, coords_data, coords_data_mixed):
+    def from_coords_data(cls, hilbert, coords_data_sectors):
         assert isinstance(hilbert, SpinOrbitalFermions)
         assert hilbert.n_fermions is not None
         assert hilbert.n_spin_subsectors >= 2
         n_orbitals = hilbert.n_orbitals
-        operator_data = prepare_operator_data_from_coords_data_dict_spin(coords_data, coords_data_mixed, n_orbitals)
-        operator_data = add_all_sectors(operator_data, hilbert.n_spin_subsectors) # add sum over all sectors
+        operator_data = prepare_operator_data_from_coords_data_dict_spin(coords_data_sectors, n_orbitals)
         return cls(hilbert, operator_data)
 
     @classmethod
-    def from_sparse_arrays(cls, hilbert, operators, **kwargs):
-        # implementation for Σ_ijklσρ V_ijkl  c_iσ^† c_jρ^† c_kρ c_lσ
-        # operators is a list of sparse matrices
-        coords_data, coords_data_mixed = _sparse_arrays_to_coords_data_spin(operators, **kwargs)
-        return cls.from_coords_data(hilbert, coords_data, coords_data_mixed)
+    def from_sparse_arrays(cls, hilbert, operators_sector):
+        # operators_sector is a dict with
+        # key: a tuple (k, sectors)
+        #      where k is the number of c/c^†
+        #      and sectors is a tuple of tuples/numbers containing the index / sets of indices of sectors the operator is acting on
+        #      each element of sectors needs to be ordered in descending order
+        # value: a sparse matrix of coefficeints of shape (n_orbitals,)*k
 
+        # convert sparse arrays to coords+data tuple
+        coords_data_sectors = _sparse_arrays_to_coords_data_dict2(operators_sector)
+        return cls.from_coords_data(hilbert, coords_data_sectors)
 
     @classmethod
-    def from_sparse_arrays2(cls, hilbert, operators_same, operators_different, **kwargs):
-        # implementation for Σ_{ijkl,σ==ρ} V_ijkl c_iσ^† c_jρ^† c_kρ c_lσ + Σ_{ijkl,σ>ρ} W_ijkl  c_iσ^† c_jρ^† c_kρ c_lσ
-        # operators_same and operators_different are dicts with sparse matrices, and number of fermionic operators as key
-        # in particular:
-        # V_ijkl = operators_same[4]
-        # W_ijkl = operators_different[4]
-        coords_data = _sparse_arrays_to_coords_data_dict(operators_same)
-        coords_data_mixed = _sparse_arrays_to_coords_data_dict(operators_different).get(4, None)
-        return cls.from_coords_data(hilbert, coords_data, coords_data_mixed)
+    def from_sparse_arrays_all_sectors(cls, hilbert, operators, cutoff=1e-11):
+        # operators = [const, hij, hijkl]
+        # ops = {0: const, 2: hij_sparse, 4: hijkl_sparse}
+        ops = _collect_ops(operators)
+
+        operators_sector = {}
+        sectors0 = ()
+        sectors1 = tuple(np.arange(hilbert.n_spin_subsectors).tolist())
+        sectors2 = tuple(map(tuple,np.array(np.triu_indices(hilbert.n_spin_subsectors, 1)).T.tolist()))
+        for k, v in ops.items():
+            if k == 0:
+                operators_sector[0, sectors0] = v
+            elif k == 2:
+                operators_sector[2, sectors1] = v
+            elif k == 4:
+                operators_sector[4, sectors1] = to_desc_order_sparse(v, cutoff)
+                # add c_ijkl + c_jilk
+                # Σ_{σ!=ρ} c_ijkl  c_iσ^† c_jρ^† c_kρ c_lσ =  Σ_{σ>ρ} (c_ijkl + c_jilk) c_iσ^† c_jρ^† c_kρ c_lσ
+                operators_sector[4, sectors2] = v.swapaxes(2,3) + v.swapaxes(0,1)
+            else:
+                raise NotImplementedError
+        return cls.from_sparse_arrays(hilbert, operators_sector)
 
     @classmethod
     def from_pyscf_molecule(cls, mol, mo_coeff, cutoff=1e-11):
         # TODO eventually deprecate this in favour of pyscf.py ?
         n_orbitals = int(mol.nao)
-        hi = SpinOrbitalFermions(n_orbitals, s=1 / 2, n_fermions_per_spin=mol.nelec)
+        hilbert = SpinOrbitalFermions(n_orbitals, s=1 / 2, n_fermions_per_spin=mol.nelec)
 
         const, hij, hijkl = compute_pyscf_integrals(mol, mo_coeff)  # not in normal order
         hij = hij * (jnp.abs(hij) > cutoff)
         hij_sparse = sparse.COO.from_numpy(hij)
         hijkl = hijkl * (jnp.abs(hijkl) > cutoff)
         hijkl_sparse = 0.5 * sparse.COO.from_numpy(hijkl)
-
-        return cls.from_sparse_arrays(hi, [const, hij_sparse, hijkl_sparse], cutoff=cutoff)
+        return cls.from_sparse_arrays_all_sectors(hilbert, [const, hij_sparse, hijkl_sparse], cutoff=cutoff)
 
     @classmethod
-    def from_fermiop(cls, ha, **kwargs):
-        cutoff = kwargs.get('cutoff', 1e-11)
-        hi = ha.hilbert
-
-        n_orbitals = hi.n_orbitals
-        n_spin_subsectors = hi.n_spin_subsectors
-        t = _fermiop_terms_to_arrays(ha.terms, ha.weights)
-        tno = to_normal_order(t)
-        tno_sector = {k: (*_split_spin_sectors(v[0], n_orbitals, n_spin_subsectors), *v[1:]) for k, v in tno.items()}
-
-        operators_same_sector = {}
-        operators_different_sector = {}
-
-        for k, (sites, sectors, daggers, weights) in tno_sector.items():
-            for i in range(n_spin_subsectors):
-                if not (((2*daggers-1)*(sectors==i)).sum(axis=-1) == 0).all():
-                    raise ValueError # does not conserve particle number per sector
-
-            sector_count = jax.vmap(partial(jnp.bincount, length=n_spin_subsectors))(sectors)
-
-            if k == 0:
-                operators_same_sector[0] = weights.reshape(())
-            elif k == 2:
-                operators_same_sector[2] = {}
-                # at this point we know there is only one sector this acts on
-                sector = sectors[:, 0]  # = sectors[:, 1]
-                for i in np.unique(sector):
-                    m = sector==i
-                    operators_same_sector[2][i] = swd_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
-            elif k == 4:
-                operators_same_sector[4] = {}
-                operators_different_sector[4] = {}
-                # at this point we know that n_sectors_acting_on \in 1,2
-                n_sectors_acting_on = np.count_nonzero(sector_count, axis=-1)
-
-                # all same sector
-                m_same = n_sectors_acting_on==1
-                swd4_same = sites[m_same], daggers[m_same], weights[m_same]
-                sector = sectors[:, 0]
-                for i in np.unique(sector[m_same]):
-                    m = (sector == i) & m_same
-                    operators_same_sector[4][i] = swd_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
-
-                m_different = ~m_same
-                sector = sectors[:, :2]
-                # i > j because we made it normal order (with site shifted by N*spin) above
-                for ij in np.unique(sector[m_different], axis=0):
-                    m = (sector == ij[None]).all(axis=-1) & m_different
-                    o = swd_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
-                    # change convention; TODO make it consistent everywhere
-                    operators_different_sector[4][tuple(ij)] = -o.swapaxes(0,1).swapaxes(2,3)
-            else:
-                raise NotImplementedError
-
-        # check that the coeffs for all sectors are the same and use one of them
-        # TODO add support different coeffs for different sectors in the operator
-        operators_same = {}
-        operators_different = {}
-        for k, d in operators_same_sector.items():
-            if k == 0:
-                operators_same[k] = d
-                continue
-            if len(d) == 0:
-                continue
-            operators_same[k] = list(d.values())[0]
-            # check
-            for i in range(n_spin_subsectors):
-                if not sparse.abs(operators_same[k]-d.get(i, 0)).max() < cutoff:
-                    raise NotImplementedError('All sectors must have the same coeffs')
-
-        for k, d in operators_different_sector.items():
-            if len(d) == 0:
-                continue
-            if k == 4:
-                operators_different[k] = list(d.values())[0]
-                # check
-                for i in range(n_spin_subsectors):
-                    for j in range(i+1, n_spin_subsectors):
-                        if not sparse.abs(operators_different[k]-d.get((j,i), 0)).max() < cutoff:
-                            raise NotImplementedError('All sectors must have the same coeffs')
-            else:
-                raise NotImplementedError
+    def from_fermiop(cls, ha, cutoff=1e-11):
+        operators_sector = fermiop_to_operators_sector(ha, cutoff=cutoff)
+        return cls.from_sparse_arrays(ha.hilbert, operators_sector)
 
 
-        return cls.from_sparse_arrays2(hi, operators_same, operators_different, **kwargs)
+
+def _insert_append(d, k, s, o, cutoff):
+    # check if an element with the same matrix but different sectors exist
+    # if yes append to the list of sectors
+    # else insert new element into the dict
+    for (k2, s2), o2 in d.items():
+        # and same number of sectors, same number of fermionic operators, same matrix (up to cutoff)
+        if ((s==() and s2 == ()) or (len(s2)>0 and len(s)>0 and  _len(s2[0]) == _len(s[0]))) and k==k2 and sparse.abs(o-o2).max() < cutoff :
+            d[k, s2+s] = d.pop((k2, s2))
+            break
+    else:
+        d[k, s] = o
+
+def tno_sector_to_operators_sector(tno_sector, n_spin_subsectors, n_orbitals, cutoff=1e-11):
+
+    operators_sector = {}
+
+    for k, (sites, sectors, daggers, weights) in tno_sector.items():
+        for i in range(n_spin_subsectors):
+            if not (((2*daggers-1)*(sectors==i)).sum(axis=-1) == 0).all():
+                raise ValueError # does not conserve particle number per sector
+
+        sector_count = jax.vmap(partial(jnp.bincount, length=n_spin_subsectors))(sectors)
+
+        # merge sectors which have same sparse matrix
+
+        if k == 0:
+            operators_sector[0, ()] = weights.reshape(())
+        elif k == 2:
+            # at this point we know there is only one sector this acts on
+            sector = sectors[:, 0]  # = sectors[:, 1]
+            for i in np.unique(sector):
+                m = sector==i
+                o = swd_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
+                _insert_append(operators_sector, k, (i,), o, cutoff)
+        elif k == 4:
+            # at this point we know that n_sectors_acting_on \in 1,2
+            n_sectors_acting_on = np.count_nonzero(sector_count, axis=-1)
+
+            # all same sector
+            m_same = n_sectors_acting_on==1
+            swd4_same = sites[m_same], daggers[m_same], weights[m_same]
+            sector = sectors[:, 0]
+            for i in np.unique(sector[m_same]):
+                m = (sector == i) & m_same
+                o = swd_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
+                _insert_append(operators_sector, k, (i,), o, cutoff)
+
+            m_different = ~m_same
+            sector = sectors[:, :2]
+            # i > j because we made it normal order (with site shifted by N*spin) above
+            for ij in np.unique(sector[m_different], axis=0):
+                m = (sector == ij[None]).all(axis=-1) & m_different
+                o = swd_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
+                # change convention; TODO make it consistent everywhere
+                o = -o.swapaxes(0,1).swapaxes(2,3)
+                _insert_append(operators_sector, k, (tuple(ij)[::-1],), o, cutoff)
+        else:
+            raise NotImplementedError
+    return operators_sector
+
+def fermiop_to_tno_sector(ha):
+    hi = ha.hilbert
+    n_orbitals = hi.n_orbitals
+    n_spin_subsectors = hi.n_spin_subsectors
+    t = _fermiop_terms_to_arrays(ha.terms, ha.weights)
+    tno = to_normal_order(t)
+    tno_sector = {k: (*_split_spin_sectors(v[0], n_orbitals, n_spin_subsectors), *v[1:]) for k, v in tno.items()}
+    return tno_sector
+
+def fermiop_to_operators_sector(ha, cutoff=1e-11):
+    hi = ha.hilbert
+    n_orbitals = hi.n_orbitals
+    n_spin_subsectors = hi.n_spin_subsectors
+    tno_sector = fermiop_to_tno_sector(ha)
+    return tno_sector_to_operators_sector(tno_sector, n_spin_subsectors, n_orbitals, cutoff=cutoff)
