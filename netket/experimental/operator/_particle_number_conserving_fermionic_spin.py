@@ -21,7 +21,7 @@ from ._particle_number_conserving_fermionic import (
     prepare_data,
     prepare_data_diagonal,
     _collect_ops,
-    _fermiop_terms_to_arrays,
+    _fermiop_terms_to_sites_daggers_weights,
 )
 from ._pyscf_utils import compute_pyscf_integrals, to_desc_order_sparse
 
@@ -209,11 +209,11 @@ def merge_spin_sectors(d, n_orbitals):
     # output: { size : (sites, daggers, weights) }
     return {k: _merge_spin_sectors(*v, n_orbitals) for k, v in d.items()}
 
-def _fermiop_terms_to_arrays_spin(terms, weights, n_orbitals, n_spin_subsectors):
+def _fermiop_terms_to_sites_sectors_daggers_weights(terms, weights, n_orbitals, n_spin_subsectors):
     # output: { size : (sites, sectors, daggers, weights) }
-    return split_spin_sectors(_fermiop_terms_to_arrays(terms, weights), n_orbitals, n_spin_subsectors)
+    return split_spin_sectors(_fermiop_terms_to_sites_daggers_weights(terms, weights), n_orbitals, n_spin_subsectors)
 
-def swd_to_sparse(sites, daggers, weights, n_orbitals):
+def sites_daggers_weights_to_sparse(sites, daggers, weights, n_orbitals):
     n = daggers.shape[-1]
     assert n%2 == 0
     assert (daggers[:, :n//2] == 1).all()
@@ -221,17 +221,17 @@ def swd_to_sparse(sites, daggers, weights, n_orbitals):
     # TODO cutoff?
     return sparse.COO(sites.T, weights, shape=(n_orbitals,)*n)
 
-def extract_operators_normal_order(*swd, n_orbitals):
+def extract_operators_normal_order(*sites_daggers_weights, n_orbitals):
     operators = []
     while True:
-        swd_daggers_left, swd = move_daggers_left(*swd)
-        swd_daggers_left = to_desc_order(*swd_daggers_left)
-        o = swd_to_sparse(*swd_daggers_left, n_orbitals)
+        sites_daggers_weights_left, sites_daggers_weights = move_daggers_left(*sites_daggers_weights)
+        sites_daggers_weights_left = to_desc_order(*sites_daggers_weights_left)
+        o = sites_daggers_weights_to_sparse(*sites_daggers_weights_left, n_orbitals)
         operators.append(o)
-        if swd[0] is None:
+        if sites_daggers_weights[0] is None:
             break
-        elif swd[0].shape[-1] == 0:
-            operators.append(swd[2].sum())
+        elif sites_daggers_weights[0].shape[-1] == 0:
+            operators.append(sites_daggers_weights[2].sum())
             break
     return operators
 
@@ -371,7 +371,7 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
         return cls.from_sparse_arrays_all_sectors(hilbert, [const, hij_sparse, hijkl_sparse], cutoff=cutoff)
 
     @classmethod
-    def from_ssdw(cls, hilbert, t, cutoff=1e-11):
+    def from_sites_sectors_daggers_weights(cls, hilbert, t, cutoff=1e-11):
         # t: { size : (sites, sectors, daggers, weights) }
         # arbitrary order of sites, sectors, and daggers
         # is internally converted to the right order for the operator
@@ -386,8 +386,8 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
         hilbert = ha.hilbert
         n_orbitals = hilbert.n_orbitals
         n_spin_subsectors = hilbert.n_spin_subsectors
-        t = _fermiop_terms_to_arrays_spin(ha.terms, ha.weights, n_orbitals, n_spin_subsectors)
-        return cls.from_ssdw(hilbert, t, cutoff=cutoff)
+        t = _fermiop_terms_to_sites_sectors_daggers_weights(ha.terms, ha.weights, n_orbitals, n_spin_subsectors)
+        return cls.from_sites_sectors_daggers_weights(hilbert, t, cutoff=cutoff)
 
 
 
@@ -427,7 +427,7 @@ def _tno_sector_to_operators_sector(tno_sector, n_spin_subsectors, n_orbitals, c
             sector = sectors[:, 0]  # = sectors[:, 1]
             for i in np.unique(sector):
                 m = sector==i
-                o = swd_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
+                o = sites_daggers_weights_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
                 _insert_append(operators_sector, k, (i,), o, cutoff)
         elif k == 4:
             # at this point we know that n_sectors_acting_on \in 1,2
@@ -435,11 +435,11 @@ def _tno_sector_to_operators_sector(tno_sector, n_spin_subsectors, n_orbitals, c
 
             # all same sector
             m_same = n_sectors_acting_on==1
-            swd4_same = sites[m_same], daggers[m_same], weights[m_same]
+            sites_daggers_weights4_same = sites[m_same], daggers[m_same], weights[m_same]
             sector = sectors[:, 0]
             for i in np.unique(sector[m_same]):
                 m = (sector == i) & m_same
-                o = swd_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
+                o = sites_daggers_weights_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
                 _insert_append(operators_sector, k, (i,), o, cutoff)
 
             m_different = ~m_same
@@ -449,7 +449,7 @@ def _tno_sector_to_operators_sector(tno_sector, n_spin_subsectors, n_orbitals, c
                 m = (sector == ij[None]).all(axis=-1) & m_different
                 # minus sign because in the operator (_get_conn_padded_interaction_up_down) we assume it's swaped to (assuming σ>ρ)
                 # cσ^† cσ cρ^† cρ = - cσ^† cρ^† cσ cρ
-                o = - swd_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
+                o = - sites_daggers_weights_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
                 _insert_append(operators_sector, k, (tuple(ij),), o, cutoff)
         else:
             raise NotImplementedError
