@@ -126,7 +126,7 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
     xp_diag = None
     mels_diag = 0
 
-    for k, v in _operator_data[0].items():
+    for k, v in _operator_data['diag'].items():
         for xi, nelectroni in zip(xs, nelec):
             _, melsi = _get_conn_padded(nelectroni, xi, *v)
             mels_diag = mels_diag + melsi
@@ -136,7 +136,7 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
         xp_list = [xp_diag]
         mels_list = [mels_diag]
 
-    for k, v in _operator_data[2].items():
+    for k, v in _operator_data['mixed_diag'].items():
         if k != 4:
             raise NotImplementedError
 
@@ -152,14 +152,14 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
         xp_list = [xp_diag]
         mels_list = [mels_diag]
 
-    for k, v in _operator_data[1].items():
+    for k, v in _operator_data['offdiag'].items():
         for i, (xi, nelectroni) in enumerate(zip(xs, nelec)):
             xpi, melsi = _get_conn_padded(nelectroni, xi, *v)
             xpi = pack_du(*xs_diag[:i], xpi, *xs_diag[i+1:])
             xp_list.append(xpi)
             mels_list.append(melsi)
 
-    for k, v in _operator_data[3].items():
+    for k, v in _operator_data['mixed_offdiag'].items():
         if k != 4:
             raise NotImplementedError
         for i in range(n_spin_subsectors):
@@ -258,7 +258,7 @@ def prepare_operator_data_from_coords_data_dict_spin(coords_data, coords_data_mi
             data_diag_mixed = {4: prepare_data_diagonal(*sw_diag, n_orbitals, _sparse=False)}
         if len(sw_offdiag[-1]) > 0:
             data_offdiag_mixed = {4: prepare_data(*sw_offdiag, n_orbitals, _sparse=False)}
-    operator_data = *operator_data, data_diag_mixed, data_offdiag_mixed
+    operator_data = {**operator_data, 'mixed_diag': data_diag_mixed, 'mixed_offdiag': data_offdiag_mixed}
     return operator_data
 
 
