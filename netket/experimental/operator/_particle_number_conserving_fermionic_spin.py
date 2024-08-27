@@ -283,6 +283,14 @@ def prepare_operator_data_from_coords_data_dict_spin(coords_data, coords_data_mi
     operator_data = {**operator_data, 'mixed_diag': data_diag_mixed, 'mixed_offdiag': data_offdiag_mixed}
     return operator_data
 
+def add_all_sectors(operator_data, n_spin_subsectors):
+    def _add(key, d):
+        if 'mixed' in key:
+            sectors = tuple(map(tuple,np.array(np.triu_indices(n_spin_subsectors, 1)).T.tolist()))
+        else:
+            sectors = tuple(np.arange(n_spin_subsectors).tolist())
+        return {(k, () if k==0 else sectors):v for k, v in d.items()}
+    return {key: _add(key,d) for key, d in operator_data.items()}
 
 # TODO generalize it to >4 fermionic operators
 
@@ -319,6 +327,7 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
         assert hilbert.n_spin_subsectors >= 2
         n_orbitals = hilbert.n_orbitals
         operator_data = prepare_operator_data_from_coords_data_dict_spin(coords_data, coords_data_mixed, n_orbitals)
+        operator_data = add_all_sectors(operator_data, hilbert.n_spin_subsectors) # add sum over all sectors
         return cls(hilbert, operator_data)
 
     @classmethod
