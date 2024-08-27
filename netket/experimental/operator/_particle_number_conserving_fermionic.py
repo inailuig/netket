@@ -261,6 +261,7 @@ def _to_fermiop_helper(index_array, create_array, weight_array):
 
     return terms, weights
 
+# TODO merge this with fermionoperator2nd prepare_terms_list
 def _fermiop_terms_to_arrays(terms, weights):
     out = {}
     for t, w in zip(terms, weights):
