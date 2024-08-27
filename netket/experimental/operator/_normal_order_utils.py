@@ -131,7 +131,7 @@ def to_normal_order(t):
     return to_desc_order(move_daggers_left(t))
 
 # test:
-# t = _fermiop_terms_to_arrays(ha.terms, ha.weights)
+# t = _fermiop_terms_to_sites_daggers_weights(ha.terms, ha.weights)
 # ha1 = FermionOperator2nd(hi, *arrays_to_fermiop_terms(t))
 # np.allclose(ha.to_dense(), ha1.to_dense())
 # t_left = move_daggers_left(t)
