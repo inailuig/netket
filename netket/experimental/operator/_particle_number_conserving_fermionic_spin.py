@@ -126,52 +126,74 @@ def get_conn_padded_pnc_spin(_operator_data, x, nelec):
     xp_diag = None
     mels_diag = 0
 
+    # TODO make sectors a jax array and use jax loop here to compile only once
+    # (requires nelec to be the same for all sectors)
+
     for k, v in _operator_data['diag'].items():
-        for xi, nelectroni in zip(xs, nelec):
-            _, melsi = _get_conn_padded(nelectroni, xi, *v)
+        if isinstance(k, tuple):
+            k, sectors = k
+        else: # backward compat; no sectors means all of them
+            sectors = () if k == 0 else np.arange(n_spin_subsectors).tolist()
+
+        if k ==0:
+            assert sectors == ()
+            sectors = (0,) # dummy sector
+
+        for i in sectors:
+            _, melsi = _get_conn_padded(nelec[i], xs[i], *v)
             mels_diag = mels_diag + melsi
-            if k ==0:
-                break
-        xp_diag = x[..., None, :]
-        xp_list = [xp_diag]
-        mels_list = [mels_diag]
+
 
     for k, v in _operator_data['mixed_diag'].items():
+        if isinstance(k, tuple):
+            k, sectors = k
+        else: # backward compat; no sectors means all of them
+            sectors = np.array(np.triu_indices(n_spin_subsectors, 1)).T.tolist()
         if k != 4:
             raise NotImplementedError
+        # TODO make sectors a jax array and use jax loop here to compile only once
+        for i,j in sectors:
+            assert j > i # here j>i
+            # e.g. take operator data to be c_ijkl + c_jilk so that here we only need to sum  ρ > σ (i.e. σ=d, ρ=u)
+            *_, melsij = _get_conn_padded_interaction_up_down(
+                nelec[i], nelec[j], xs[i], xs[j], *v
+            )
+            mels_diag = mels_diag + melsij
 
-        for i in range(n_spin_subsectors):
-            for j in range(i+1, n_spin_subsectors):
-                # here j>i
-                # further assume operator data is c_ijkl + c_jilk so that here we only need to sum  ρ > σ (i.e. σ=d, ρ=u)
-                *_, melsij = _get_conn_padded_interaction_up_down(
-                    nelec[i], nelec[j], xs[i], xs[j], *v
-                )
-                xp_diag = x[..., None, :]
-                mels_diag = mels_diag + melsij
-        xp_list = [xp_diag]
-        mels_list = [mels_diag]
+    # always add diag element, even if it's zero; TODO only add if needed?
+    xp_diag = x[..., None, :]
+    xp_list = [xp_diag]
+    mels_list = [mels_diag]
 
     for k, v in _operator_data['offdiag'].items():
-        for i, (xi, nelectroni) in enumerate(zip(xs, nelec)):
-            xpi, melsi = _get_conn_padded(nelectroni, xi, *v)
+        if isinstance(k, tuple):
+            k, sectors = k
+        else: # backward compat; no sectors means all of them
+            sectors = np.arange(n_spin_subsectors).tolist()
+
+        # TODO make sectors a jax array and use jax loop here to compile only once
+        for i in sectors:
+            xpi, melsi = _get_conn_padded(nelec[i], xs[i], *v)
             xpi = pack_du(*xs_diag[:i], xpi, *xs_diag[i+1:])
             xp_list.append(xpi)
             mels_list.append(melsi)
 
     for k, v in _operator_data['mixed_offdiag'].items():
+        if isinstance(k, tuple):
+            k, sectors = k
+        else: # backward compat; no sectors means all of them
+            sectors = np.array(np.triu_indices(n_spin_subsectors, 1)).T.tolist()
         if k != 4:
             raise NotImplementedError
-        for i in range(n_spin_subsectors):
-            for j in range(i+1, n_spin_subsectors):
-                # here j>i
-                # further assume operator data is c_ijkl + c_jilk so that here we only need to sum  ρ > σ (i.e. σ=d, ρ=u)
-                xpi, xpj, melsij = _get_conn_padded_interaction_up_down(
-                    nelec[i], nelec[j], xs[i], xs[j], *v
-                )
-                xpij = pack_du(*xs_diag[:i], xpi, *xs_diag[i+1:j], xpj, *xs_diag[j+1:])
-                xp_list.append(xpij)
-                mels_list.append(melsij)
+        for i,j in sectors:
+            assert j > i # here j>i
+            # e.g. take operator data to be c_ijkl + c_jilk so that here we only need to sum  ρ > σ (i.e. σ=d, ρ=u)
+            xpi, xpj, melsij = _get_conn_padded_interaction_up_down(
+                nelec[i], nelec[j], xs[i], xs[j], *v
+            )
+            xpij = pack_du(*xs_diag[:i], xpi, *xs_diag[i+1:j], xpj, *xs_diag[j+1:])
+            xp_list.append(xpij)
+            mels_list.append(melsij)
     if len(xp_list) > 0:
         xp = jnp.concatenate(xp_list, axis=-2).astype(dtype)
         mels = jnp.concatenate(mels_list, axis=-1)
