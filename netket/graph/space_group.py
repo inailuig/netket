@@ -155,7 +155,7 @@ class SpaceGroupBuilder(struct.Pytree):
         The point group as a `PermutationGroup` acting on the sites of `self.lattice`.
         """
         perms = []
-        for p in self.point_group_:
+        for p in self._point_group:
             if isinstance(p, Identity):
                 perms.append(Identity())
             else:
