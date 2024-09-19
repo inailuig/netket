@@ -13,8 +13,6 @@ import pytest
 
 from .. import common
 
-pytestmark = common.skipif_distributed
-
 op_ferm = {}
 hi = nkx.hilbert.SpinOrbitalFermions(4)
 
