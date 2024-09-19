@@ -518,11 +518,20 @@ def batched_take_along_axis(a, indices, axis):
 
 
 def partition(axis, mesh, arg_shapes, result_shape):
-    a_sharding = arg_shapes[0].sharding
+    a_shape = arg_shapes[0]
+    a_sharding = a_shape.sharding
 
     # enforce that axis is not sharded
     if isinstance(a_sharding, jax.sharding.PositionalSharding):
         s = a_sharding.replicate(axis=axis)
+    elif isinstance(a_sharding, jax.sharding.NamedSharding):
+        partitions = list(a_sharding.spec) + [
+            None for _ in range(a_shape.ndim - len(a_sharding.spec))
+        ]
+        partitions[axis] = None
+        s = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec(*partitions))
+    elif a_sharding is None:
+        s = jax.sharding.NamedSharding(mesh, jax.sharding.PartitionSpec())
     else:
         raise NotImplementedError  # TODO GSPMDSharding etc
     arg_shardings = (s, s)  # enforce that indices is sharded the same way as a
@@ -536,13 +545,11 @@ def partition(axis, mesh, arg_shapes, result_shape):
 
 
 def infer_sharding_from_operands(axis, mesh, arg_shapes, result_shape):
-    a_sharding = arg_shapes[0].sharding
-    if a_sharding is None:
-        spec = jax.sharding.PartitionSpec()
-        a_sharding = jax.sharding.NamedSharding(mesh, spec)
-    return a_sharding
+    return partition(axis, mesh, arg_shapes, result_shape)[2]
 
 
 batched_take_along_axis.def_partition(
-    infer_sharding_from_operands=infer_sharding_from_operands, partition=partition
+    infer_sharding_from_operands=infer_sharding_from_operands,
+    partition=partition,
+    decode_shardings=True,
 )
