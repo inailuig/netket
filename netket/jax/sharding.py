@@ -32,6 +32,8 @@ from jax.sharding import (
 )
 from jax.experimental.shard_map import shard_map
 from jax.util import safe_zip
+from jax.experimental.custom_partitioning import custom_partitioning
+
 
 from netket.utils import config, mpi
 from netket.utils.deprecation import warn_deprecation
@@ -508,3 +510,39 @@ def device_count() -> int:
         jax.device_count() if config.netket_experimental_sharding is True, and mpi.rank otherwise.
     """
     return mpi.n_nodes * device_count_per_rank()
+
+
+@partial(custom_partitioning, static_argnums=(2,))
+def batched_take_along_axis(a, indices, axis):
+    return jnp.take_along_axis(a, indices, axis)
+
+
+def partition(axis, mesh, arg_shapes, result_shape):
+    a_sharding = arg_shapes[0].sharding
+
+    # enforce that axis is not sharded
+    if isinstance(a_sharding, jax.sharding.PositionalSharding):
+        s = a_sharding.replicate(axis=axis)
+    else:
+        raise NotImplementedError  # TODO GSPMDSharding etc
+    arg_shardings = (s, s)  # enforce that indices is sharded the same way as a
+    result_shardings = s
+    return (
+        mesh,
+        partial(jnp.take_along_axis, axis=axis),
+        result_shardings,
+        arg_shardings,
+    )
+
+
+def infer_sharding_from_operands(axis, mesh, arg_shapes, result_shape):
+    a_sharding = arg_shapes[0].sharding
+    if a_sharding is None:
+        spec = jax.sharding.PartitionSpec()
+        a_sharding = jax.sharding.NamedSharding(mesh, spec)
+    return a_sharding
+
+
+batched_take_along_axis.def_partition(
+    infer_sharding_from_operands=infer_sharding_from_operands, partition=partition
+)
