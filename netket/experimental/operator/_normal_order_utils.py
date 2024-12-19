@@ -1,7 +1,24 @@
 import numpy as np
 from functools import partial
 
-from netket.experimental.operator._pyscf_utils import _parity
+def parity(x):
+    """
+    compute the parity of a permutation (along axis 1)
+    vectorized along all leading batch dimensions
+
+    this function is equivalent to
+    ```
+    from sympy.combinatorics.permutations import Permutation
+    parity = partial(np.apply_along_axis, lambda x: Permutation(x).parity(), -1)
+    ```
+    """
+    # see https://github.com/sympy/sympy/blob/96836db06ba6b78103dd4217db53db31502fb2f6/sympy/combinatorics/permutations.py#L115
+
+    n = x.shape[-1]
+    A = x[..., :, None] < x[..., None, :]
+    mask = np.tril(np.ones((n,n), dtype=bool))
+    mask = np.expand_dims(mask, tuple(range(0, A.ndim-2)))
+    return np.bitwise_xor.reduce(A & mask, axis=(-2, -1))
 
 
 def prune(sites, daggers, weights):
@@ -157,7 +174,7 @@ def _to_desc_order(sites, daggers, weights):
     perm1 = np.argsort(s1, axis=-1)
     a = np.arange(len(sites))[:,None]
     sites_desc = sites_[a, perm0] * (1-daggers_) + sites_[a, perm1] * daggers_
-    weights_desc = weights_ * (1-2*(_parity(perm0) ^ _parity(perm1)))
+    weights_desc = weights_ * (1-2*(parity(perm0) ^ parity(perm1)))
 
     # TODO also merge duplicates
     return prune(sites_desc, daggers_, weights_desc)
