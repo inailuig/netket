@@ -8,11 +8,13 @@ import jax.numpy as jnp
 
 from netket.jax import COOTensor
 
+
 def len_helper(s):
     if isinstance(s, tuple):
         return len(s)
     else:
         return 1
+
 
 def _prepare_data_helper(sites_destr, sites_create, weights, n_orbitals, sparse_=True):
     # we encode sites_create==sites_destr by passing sites_create=None
@@ -171,12 +173,14 @@ def prepare_data(sites, weights, n_orbitals, **kwargs):
     assert n_ops % 2 == 0
     sites_destr = sites[:, : n_ops // 2]
     sites_create = sites[:, n_ops // 2 :]
-    return _prepare_data_helper(sites_destr, sites_create, weights, n_orbitals, **kwargs)
+    return _prepare_data_helper(
+        sites_destr, sites_create, weights, n_orbitals, **kwargs
+    )
 
 
 def split_diag_offdiag(sites, weights):
     """
-        Split the diagonal and off-diagonal terms
+    Split the diagonal and off-diagonal terms
     """
     n_terms, n_ops = sites.shape
     assert weights.shape == (n_terms,)
@@ -193,7 +197,7 @@ def split_diag_offdiag(sites, weights):
     return (diag_sites, diag_weights), (offdiag_sites, offdiag_weights)
 
 
-def  prepare_operator_data_from_coords_data_dict(coords_data_dict, n_orbitals, **kwargs):
+def prepare_operator_data_from_coords_data_dict(coords_data_dict, n_orbitals, **kwargs):
     r"""
     Prepare the custom sparse internal data for ParticleNumberConservingFermioperator2ndJax
 
@@ -221,16 +225,17 @@ def  prepare_operator_data_from_coords_data_dict(coords_data_dict, n_orbitals, *
             data_diag[k] = prepare_data_diagonal(*sw_diag, n_orbitals, **kwargs)
         if len(sw_offdiag[-1]) > 0:
             data_offdiag[k] = prepare_data(*sw_offdiag, n_orbitals, **kwargs)
-    data = {'diag': data_diag, 'offdiag':data_offdiag}
+    data = {"diag": data_diag, "offdiag": data_offdiag}
     return data
 
 
 def sparse_arrays_to_coords_data_dict(ops):
     """
-        Split dictionary values of sparse arrays into indices and data
+    Split dictionary values of sparse arrays into indices and data
 
-        (optionally) supports spin sectors in the key
+    (optionally) supports spin sectors in the key
     """
+
     def _unpack(k, v):
         if isinstance(k, tuple):
             k, _ = k  # _ are the spin sectors
@@ -238,6 +243,7 @@ def sparse_arrays_to_coords_data_dict(ops):
             return np.zeros((1, 0), dtype=int), np.array([v])
         else:
             return v.coords.T, v.data
+
     return {k: _unpack(k, v) for k, v in ops.items()}
 
 
@@ -258,7 +264,7 @@ def collect_ops(operators):
                 A = A.fill_value
             else:
                 assert A.fill_value == 0
-        elif jnp.isscalar(A) or (hasattr(A, "__array__") and A.ndim==0):
+        elif jnp.isscalar(A) or (hasattr(A, "__array__") and A.ndim == 0):
             A = np.asarray(A)
             k = 0
         elif hasattr(A, "__array__"):
@@ -274,23 +280,33 @@ def collect_ops(operators):
     return ops
 
 
-
-
 def prepare_operator_data_from_coords_data_dict_spin(coords_data_sectors, n_orbitals):
     # version with sectors
-    _cond = lambda s: s==() or len_helper(s[0]) == 1
-    coords_data_same = {(k,s): v for (k, s), v in coords_data_sectors.items() if _cond(s)}
-    coords_data_mixed = {(k,s): v for (k, s), v in coords_data_sectors.items() if not _cond(s)}
+    _cond = lambda s: s == () or len_helper(s[0]) == 1
+    coords_data_same = {
+        (k, s): v for (k, s), v in coords_data_sectors.items() if _cond(s)
+    }
+    coords_data_mixed = {
+        (k, s): v for (k, s), v in coords_data_sectors.items() if not _cond(s)
+    }
 
-    operator_data = prepare_operator_data_from_coords_data_dict(coords_data_same, n_orbitals)
+    operator_data = prepare_operator_data_from_coords_data_dict(
+        coords_data_same, n_orbitals
+    )
     # process mixed terms
     data_diag_mixed = {}
     data_offdiag_mixed = {}
     for k, v in coords_data_mixed.items():
         sw_diag, sw_offdiag = split_diag_offdiag(*v)
         if len(sw_diag[-1]) > 0:
-            data_diag_mixed[k] = prepare_data_diagonal(*sw_diag, n_orbitals, sparse_=False)
+            data_diag_mixed[k] = prepare_data_diagonal(
+                *sw_diag, n_orbitals, sparse_=False
+            )
         if len(sw_offdiag[-1]) > 0:
             data_offdiag_mixed[k] = prepare_data(*sw_offdiag, n_orbitals, sparse_=False)
-    operator_data = {**operator_data, 'mixed_diag': data_diag_mixed, 'mixed_offdiag': data_offdiag_mixed}
+    operator_data = {
+        **operator_data,
+        "mixed_diag": data_diag_mixed,
+        "mixed_offdiag": data_offdiag_mixed,
+    }
     return operator_data
