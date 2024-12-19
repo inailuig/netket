@@ -1,5 +1,7 @@
+# utilities to bring the intermediate internal representation into normal order
+
+
 import numpy as np
-from functools import partial
 
 def parity(x):
     """
@@ -71,7 +73,7 @@ def _move_daggers_left(sites, daggers, weights):
     # TODO
     # re-implement non-recursively using Wick thm
 
-    n = daggers_.shape[-1]
+    n = daggers.shape[-1]
     if n == 0:
         return (sites, daggers, weights),
 
@@ -167,17 +169,17 @@ def _to_desc_order(sites, daggers, weights):
     assert (xr > sites.max()).all()
 
     # minus because we order descending
-    s0 = -daggers_ * xr - (1-daggers_) * sites
-    s1 = - daggers_ * sites - (1-daggers_)*xl
+    s0 = -daggers * xr - (1-daggers) * sites
+    s1 = - daggers * sites - (1-daggers)*xl
 
     perm0 = np.argsort(s0, axis=-1)
     perm1 = np.argsort(s1, axis=-1)
     a = np.arange(len(sites))[:,None]
-    sites_desc = sites_[a, perm0] * (1-daggers_) + sites_[a, perm1] * daggers_
-    weights_desc = weights_ * (1-2*(parity(perm0) ^ parity(perm1)))
+    sites_desc = sites[a, perm0] * (1-daggers) + sites[a, perm1] * daggers
+    weights_desc = weights * (1-2*(parity(perm0) ^ parity(perm1)))
 
     # TODO also merge duplicates
-    return prune(sites_desc, daggers_, weights_desc)
+    return prune(sites_desc, daggers, weights_desc)
 
 def to_desc_order(t):
     """
@@ -206,8 +208,51 @@ def to_normal_order(t):
     """
     return to_desc_order(move_daggers_left(t))
 
+
+def _split_spin_sectors_helper(sites, daggers, weights, n_orbitals, n_spin_subsectors):
+    n_ops = sites.shape[1]
+    if n_ops == 0:
+        return sites, np.zeros_like(sites), daggers, weights
+    L = np.arange(n_spin_subsectors)*n_orbitals
+    R = np.arange(1, n_spin_subsectors+1)*n_orbitals
+    sectors_mask = ((sites[...,None] >= L) & (sites[...,None] < R)) # n_terms x n_ops x n_spin_subsectors
+    sectors = np.einsum('...i,i', sectors_mask, np.arange(n_spin_subsectors)).astype(np.int32)
+    sites = sites - sectors * n_orbitals
+    return sites, sectors, daggers, weights
+
+def split_spin_sectors(d, n_orbitals, n_spin_subsectors):
+    """
+    input: { size : (sites, daggers, weights) }
+    output: { size : (sites, sectors, daggers, weights) }
+    """
+    return {k: _split_spin_sectors_helper(*v, n_orbitals, n_spin_subsectors) for k, v in d.items()}
+
+def _merge_spin_sectors_helper(sites, sectors, daggers, weights, n_orbitals):
+    return sites + sectors * n_orbitals, daggers, weights
+
+def merge_spin_sectors(d, n_orbitals):
+    """
+    input: { size : (sites, sectors, daggers, weights) }
+    output: { size : (sites, daggers, weights) }
+    """
+    return {k: _merge_spin_sectors_helper(*v, n_orbitals) for k, v in d.items()}
+
+def to_normal_order_sector(t, n_spin_subsectors, n_orbitals):
+    """convert to normal order with higher sector to the left"""
+    return split_spin_sectors(to_normal_order(merge_spin_sectors(t, n_orbitals)), n_orbitals, n_spin_subsectors)
+
+
+# def arrays_to_fermiop_terms(t):
+#     terms = []
+#     weights = []
+#     for s,d,w in t.values():
+#         terms = terms + np.concatenate([s[..., None],d[..., None]], axis=-1).tolist()
+#         weights = weights + w.tolist()
+#     return terms, weights
+
+
 # test:
-# t = _fermiop_terms_to_sites_daggers_weights(ha.terms, ha.weights)
+# t = fermiop_terms_to_sites_daggers_weights(ha.terms, ha.weights)
 # ha1 = FermionOperator2nd(hi, *arrays_to_fermiop_terms(t))
 # np.allclose(ha.to_dense(), ha1.to_dense())
 # t_left = move_daggers_left(t)
