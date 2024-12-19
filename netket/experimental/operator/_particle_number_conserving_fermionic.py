@@ -110,6 +110,7 @@ def prepare_data_diagonal(sites_destr, weights, n_orbitals, **kwargs):
     """
 
     Prepare the custom sparse internal data for ParticleNumberConservingFermioperator2ndJax, for the diagonal part of the operator
+    of strings of a fixed length
 
     Assume we are given a sequence of equal-length normal ordered strings \sum_i w_i c_{a_i1}^\dagger ... c_{a_iN}^\dagger c_{a_i1} ... c_{a_iN}
     with 2N fermionic operators, with larger indices to the left: a_i1 >=...>=a_iN
@@ -136,6 +137,7 @@ def prepare_data_diagonal(sites_destr, weights, n_orbitals, **kwargs):
 def prepare_data(sites, weights, n_orbitals, **kwargs):
     """
     Prepare the custom sparse internal data for ParticleNumberConservingFermioperator2ndJax
+    of strings of a fixed length
 
     It is given by a 3-tuple for every length N of string in normal ordering (containg 2N fermionic operators),
 
@@ -194,7 +196,44 @@ def split_diag_offdiag(sites, weights):
     return (diag_sites, diag_weights), (offdiag_sites, offdiag_weights)
 
 
+def  prepare_operator_data_from_coords_data_dict(
+coords_data_dict, n_orbitals, **kwargs
+):
+"""
+    Prepare the custom sparse internal data for ParticleNumberConservingFermioperator2ndJax
+
+    of a string of operators \sum_N \sum_i w_i^{(N)} c_{a_i1^{(N)}}^\dagger ... c_{a_iN^{(N)}}^\dagger c_{b_i1^{(N)}} ... c_{b_iN^{(N)}}
+    in descending order a_i1 >=...>=a_iN, b_i1 >=...>=b_iN.
+
+    Please refer to the docstring of prepare_data, prepare_data_diagonal for a more complete explanation of the storage format.
+
+    Args:
+        coords_data_dict: A dictionary {N: (sites, weights)}
+            where for every length N
+                sites is a matrix containing the stacked indices [[a_i1^{(N)}, ... a_iN^{(N)}, b_i1^{(N)}, ..., b_iN^{(N)}]]
+                of the c^\dagger and c
+                weights is a vector containing the corresponding weights [w_i^{(N)}]
+        n_orbitals: number of orbitals
+    Returns:
+        A dictionary {'diag': { N:  (None, None, weight_array)}, 'offdiag': { N : (index_array, create_array, weight_array)}}
+        containing the sparse representation for every lenght N of strings c_{a_i1}^\dagger ... c_{a_iN}^\dagger c_{b_i1} ... c_{b_iN}
+"""
+    data_offdiag = {}
+    data_diag = {}
+    for k, v in coords_data_dict.items():
+        sw_diag, sw_offdiag = split_diag_offdiag(*v)
+        if len(sw_diag[-1]) > 0:
+            data_diag[k] = prepare_data_diagonal(*sw_diag, n_orbitals, **kwargs)
+        if len(sw_offdiag[-1]) > 0:
+            data_offdiag[k] = prepare_data(*sw_offdiag, n_orbitals, **kwargs)
+    data = {'diag': data_diag, 'offdiag':data_offdiag}
+    return data
+
+
 def _comb(kl, n):
+    """
+    compute all combinations of n elements from kl
+    """
     if len(kl) < n:
         return jnp.zeros((n, 0), dtype=kl.dtype)
     c = list(itertools.combinations(np.arange(len(kl)), n))
@@ -318,6 +357,20 @@ def _to_fermiop_helper(index_array, create_array, weight_array):
 
 # TODO merge this with fermionoperator2nd prepare_terms_list
 def _fermiop_terms_to_sites_daggers_weights(terms, weights):
+    """
+    helper function to turn the python dictionary of FermionOperator2nd/FermionOperator2ndJax
+
+
+    Args:
+        terms: terms as specified in FermionOperator2nd/FermionOperator2ndJax
+        weights: a list of weights 
+    Returns:
+        a dictionary {k: (sites, daggers, weights)}
+        where for every set of operators of length k
+            sites: (n_terms, k) matrix containing the indices of the c/c^\dagger operators
+            daggers: (n_terms,k), matrix storing c/c^\dagger as 0/1
+            weights: (n_terms,) vector of corresponding weights
+    """
     out = {}
     for t, w in zip(terms, weights):
         if len(t) == 0:  # constant
@@ -363,22 +416,6 @@ def sparse__arrays_to_coords_data_dict(ops):
     return coords_data_dict
 
 
-def _prepare_operator_data_from_coords_data_dict(
-coords_data_dict, n_orbitals, **kwargs
-):
-    # n_fermions = hi.n_fermions
-    data_offdiag = {}
-    data_diag = {}
-    for k, v in coords_data_dict.items():
-        sw_diag, sw_offdiag = split_diag_offdiag(*v)
-        if len(sw_diag[-1]) > 0:
-            data_diag[k] = prepare_data_diagonal(*sw_diag, n_orbitals, **kwargs)
-        if len(sw_offdiag[-1]) > 0:
-            data_offdiag[k] = prepare_data(*sw_offdiag, n_orbitals, **kwargs)
-    data = {'diag': data_diag, 'offdiag':data_offdiag}
-    return data
-
-
 @struct.dataclass
 class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
     """
@@ -390,7 +427,7 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
     To be used with netket.hilbert.SpinOrbitalFermions with a fixed number of fermions.
 
     It uses a custom sparse internal representation,
-    please refer to the docstrings of prepare_data and prepare_data_diagonal.
+    please refer to the docstrings of prepare_data and prepare_data_diagonal for details.
 
     We provide several factory methods to create this operator:
         - ParticleNumberConservingFermioperator2ndJax.from_fermiop:
@@ -459,7 +496,7 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
         assert isinstance(hilbert, SpinOrbitalFermions)
         assert hilbert.n_fermions is not None
         n_orbitals = hilbert.n_orbitals * hilbert.n_spin_subsectors
-        data = _prepare_operator_data_from_coords_data_dict(
+        data =  prepare_operator_data_from_coords_data_dict(
             coords_data_dict, n_orbitals, **kwargs
         )
         return cls(hilbert, data)
