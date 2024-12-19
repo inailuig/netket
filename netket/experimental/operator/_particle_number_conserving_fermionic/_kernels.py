@@ -10,6 +10,7 @@ import jax.numpy as jnp
 
 from netket.jax import reduce_xor
 
+
 def _comb(kl, n):
     """
     compute all combinations of n elements from a set kl
@@ -53,7 +54,7 @@ def _jw_kernel(k_destroy, l_create, x):
 
 
 @partial(jax.jit, static_argnums=0)
-@partial(jnp.vectorize, signature="(n)->(m,n),(m)", excluded=(0, 2, 3, 4)) # vectorize over x
+@partial(jnp.vectorize, signature="(n)->(m,n),(m)", excluded=(0, 2, 3, 4))
 def _get_conn_padded(n_fermions, x, index_array, create_array, weight_array):
     assert x.ndim == 1
     if index_array is not None:
@@ -102,15 +103,14 @@ def _get_conn_padded(n_fermions, x, index_array, create_array, weight_array):
     return xp, mels
 
 
-
 # TODO do this in hilbert ?
-@partial(jax.jit, static_argnames='n_spin_subsectors')
+@partial(jax.jit, static_argnames="n_spin_subsectors")
 def unpack_spin_sectors(x, n_spin_subsectors=2):
     """
     split spin sectors of x
     """
     assert x.shape[-1] % n_spin_subsectors == 0
-    x_ = x.reshape(x.shape[:-1] + (n_spin_subsectors, x.shape[-1]//n_spin_subsectors))
+    x_ = x.reshape(x.shape[:-1] + (n_spin_subsectors, x.shape[-1] // n_spin_subsectors))
     return tuple(x_[..., i, :] for i in range(n_spin_subsectors))
 
 
@@ -204,20 +204,19 @@ def get_conn_padded_pnc(_operator_data, x, n_fermions):
     mels_list = []
     xp_diag = None
     mels_diag = 0
-    for k, v in _operator_data['diag'].items():
+    for k, v in _operator_data["diag"].items():
         xp, mels = _get_conn_padded(n_fermions, x, *v)
         xp_diag = xp
         mels_diag = mels_diag + mels
         xp_list = [xp_diag]
         mels_list = [mels_diag]
-    for k, v in _operator_data['offdiag'].items():
+    for k, v in _operator_data["offdiag"].items():
         xp, mels = _get_conn_padded(n_fermions, x, *v)
         xp_list.append(xp)
         mels_list.append(mels)
     xp = jnp.concatenate(xp_list, axis=-2)
     mels = jnp.concatenate(mels_list, axis=-1)
     return xp.astype(dtype), mels
-
 
 
 @partial(jax.jit, static_argnames=("n_fermions_per_spin",))
@@ -235,23 +234,22 @@ def get_conn_padded_pnc_spin(_operator_data, x, n_fermions_per_spin):
     # TODO make sectors a jax array and use jax loop here to compile only once ?
     # (requires n_fermions_per_spin to be the same for all sectors)
 
-    for (k, sectors), v in _operator_data['diag'].items():
-
-        if k ==0:
+    for (k, sectors), v in _operator_data["diag"].items():
+        if k == 0:
             assert sectors == ()
-            sectors = (0,) # dummy sector
+            sectors = (0,)  # dummy sector
 
         for i in sectors:
             _, melsi = _get_conn_padded(n_fermions_per_spin[i], xs[i], *v)
             mels_diag = mels_diag + melsi
             xp_diag = x[..., None, :]
 
-    for (k, sectors), v in _operator_data['mixed_diag'].items():
+    for (k, sectors), v in _operator_data["mixed_diag"].items():
         if k != 4:
             raise NotImplementedError
         # TODO make sectors a jax array and use jax loop here to compile only once
-        for i,j in sectors:
-            assert i>j # here i>j
+        for i, j in sectors:
+            assert i > j  # here i>j
             # e.g. take operator data to be c_ijkl + c_jilk so that here we only need to sum  ρ > σ (i.e. σ=d, ρ=u)
             *_, melsij = _get_conn_padded_interaction_up_down(
                 n_fermions_per_spin[j], n_fermions_per_spin[i], xs[j], xs[i], *v
@@ -264,31 +262,33 @@ def get_conn_padded_pnc_spin(_operator_data, x, n_fermions_per_spin):
         xp_list = [xp_diag]
         mels_list = [mels_diag]
 
-    for (k, sectors), v in _operator_data['offdiag'].items():
+    for (k, sectors), v in _operator_data["offdiag"].items():
         # TODO make sectors a jax array and use jax loop here to compile only once ?
         # (requires n_fermions_per_spin to be the same for all sectors)
         for i in sectors:
             xpi, melsi = _get_conn_padded(n_fermions_per_spin[i], xs[i], *v)
-            xpi = pack_spin_sectors(*xs_diag[:i], xpi, *xs_diag[i+1:])
+            xpi = pack_spin_sectors(*xs_diag[:i], xpi, *xs_diag[i + 1 :])
             xp_list.append(xpi)
             mels_list.append(melsi)
 
-    for (k, sectors), v in _operator_data['mixed_offdiag'].items():
+    for (k, sectors), v in _operator_data["mixed_offdiag"].items():
         if k != 4:
             raise NotImplementedError
-        for i,j in sectors:
-            assert i>j # here i>j
+        for i, j in sectors:
+            assert i > j  # here i>j
             # e.g. take operator data to be c_ijkl + c_jilk so that here we only need to sum  ρ > σ (i.e. σ=d, ρ=u)
             xpj, xpi, melsij = _get_conn_padded_interaction_up_down(
                 n_fermions_per_spin[j], n_fermions_per_spin[i], xs[j], xs[i], *v
             )
-            xpij = pack_spin_sectors(*xs_diag[:j], xpj, *xs_diag[j+1:i], xpi, *xs_diag[i+1:])
+            xpij = pack_spin_sectors(
+                *xs_diag[:j], xpj, *xs_diag[j + 1 : i], xpi, *xs_diag[i + 1 :]
+            )
             xp_list.append(xpij)
             mels_list.append(melsij)
     if len(xp_list) > 0:
         xp = jnp.concatenate(xp_list, axis=-2).astype(dtype)
         mels = jnp.concatenate(mels_list, axis=-1)
     else:
-        xp = jnp.zeros((*x.shape[:-1], 0,x.shape[-1]), dtype=dtype)
-        mels = jnp.zeros(xp.shape[:-1]) # TODO dtype?
+        xp = jnp.zeros((*x.shape[:-1], 0, x.shape[-1]), dtype=dtype)
+        mels = jnp.zeros(xp.shape[:-1])  # TODO dtype?
     return xp, mels

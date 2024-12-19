@@ -3,6 +3,7 @@
 
 import numpy as np
 
+
 def parity(x):
     """
     compute the parity of a permutation (along axis 1)
@@ -18,8 +19,8 @@ def parity(x):
 
     n = x.shape[-1]
     A = x[..., :, None] < x[..., None, :]
-    mask = np.tril(np.ones((n,n), dtype=bool))
-    mask = np.expand_dims(mask, tuple(range(0, A.ndim-2)))
+    mask = np.tril(np.ones((n, n), dtype=bool))
+    mask = np.expand_dims(mask, tuple(range(0, A.ndim - 2)))
     return np.bitwise_xor.reduce(A & mask, axis=(-2, -1))
 
 
@@ -27,8 +28,11 @@ def prune(sites, daggers, weights):
     """
     remove ĉᵢĉᵢ and ĉᵢ†ĉᵢ† on the same site i
     """
-    mask = ~((np.diff(daggers, axis=-1) == 0) & (np.diff(sites, axis=-1) == 0)).any(axis=-1)
+    mask = ~((np.diff(daggers, axis=-1) == 0) & (np.diff(sites, axis=-1) == 0)).any(
+        axis=-1
+    )
     return sites[mask], daggers[mask], weights[mask]
+
 
 def _move(i, j, x, mask=None):
     """
@@ -37,7 +41,7 @@ def _move(i, j, x, mask=None):
     """
     n = x.shape[-1]
     a = np.arange(n)[None]
-    masklr = (a<i) | (a>j)
+    masklr = (a < i) | (a > j)
     maskj = a == j
     mask_middle = ~(masklr | maskj)
     x1 = np.roll(x, -1, axis=-1)
@@ -45,7 +49,8 @@ def _move(i, j, x, mask=None):
     res = masklr * x + mask_middle * x1 + maskj * xi
     if mask is None:
         return res
-    return res * mask + (~mask)*x
+    return res * mask + (~mask) * x
+
 
 def _remove(i, j, x):
     """
@@ -53,8 +58,8 @@ def _remove(i, j, x):
     """
     n = x.shape[-1]
     a = np.arange(n)[None]
-    maskl = a<i
-    maskr = a>j-2
+    maskl = a < i
+    maskr = a > j - 2
     mask_middle = ~(maskl | maskr)
     x1 = np.roll(x, -1, axis=-1)
     x2 = np.roll(x, -2, axis=-1)
@@ -75,7 +80,7 @@ def _move_daggers_left(sites, daggers, weights):
 
     n = daggers.shape[-1]
     if n == 0:
-        return (sites, daggers, weights),
+        return ((sites, daggers, weights),)
 
     sites_ = sites
     daggers_ = daggers
@@ -88,9 +93,9 @@ def _move_daggers_left(sites, daggers, weights):
     while True:
         a = np.arange(n)[None]
         # find leftmost c
-        i = np.argmin(daggers_,axis=1, keepdims=True)
+        i = np.argmin(daggers_, axis=1, keepdims=True)
         # find next c^\dagger
-        j = np.argmax((i < a) & daggers_,axis=1, keepdims=True)
+        j = np.argmax((i < a) & daggers_, axis=1, keepdims=True)
 
         # now move the c after the c^\dagger if necessary
 
@@ -98,7 +103,7 @@ def _move_daggers_left(sites, daggers, weights):
         if ~do_move.any():
             break
 
-        sign = 1-2*(((j-i)*do_move)%2).ravel()
+        sign = 1 - 2 * (((j - i) * do_move) % 2).ravel()
 
         si = np.take_along_axis(sites_, i, 1)
         sj = np.take_along_axis(sites_, j, 1)
@@ -107,11 +112,13 @@ def _move_daggers_left(sites, daggers, weights):
         new_daggers = _move(i, j, daggers_, mask=do_move)
         new_weights = weights_ * sign
 
-        same = ((si==sj) & do_move).ravel()
+        same = ((si == sj) & do_move).ravel()
         new_sites2 = _remove(i[same], j[same], sites_[same])
         new_daggers2 = _remove(i[same], j[same], daggers_[same])
         new_weights2 = -(weights_ * sign)[same]
-        new_sites2, new_daggers2, new_weights2 = prune(new_sites2, new_daggers2, new_weights2)
+        new_sites2, new_daggers2, new_weights2 = prune(
+            new_sites2, new_daggers2, new_weights2
+        )
 
         if len(new_sites2) > 0:
             new_sites_smaller.append(new_sites2)
@@ -126,9 +133,12 @@ def _move_daggers_left(sites, daggers, weights):
         new_daggers_smaller = np.concatenate(new_daggers_smaller, axis=0)
         new_weights_smaller = np.concatenate(new_weights_smaller, axis=0)
         # recursion; TODO collapse first and only run once for each size instead?
-        return (sites_, daggers_, weights_), *_move_daggers_left(new_sites_smaller, new_daggers_smaller, new_weights_smaller)
+        return (sites_, daggers_, weights_), *_move_daggers_left(
+            new_sites_smaller, new_daggers_smaller, new_weights_smaller
+        )
     else:
-        return (sites_, daggers_, weights_),
+        return ((sites_, daggers_, weights_),)
+
 
 def move_daggers_left(t):
     """
@@ -144,12 +154,12 @@ def move_daggers_left(t):
     d = {}
     for sdw in [x for v in t.values() for x in _move_daggers_left(*v)]:
         k = sdw[0].shape[-1]
-        if sdw[-1].size > 0: # not empty
+        if sdw[-1].size > 0:  # not empty
             di = d.pop(k, None)
             if di is None:
                 d[k] = sdw
             else:
-               d[k] = tuple(np.concatenate([a,b], axis=0) for a, b in zip(di,sdw))
+                d[k] = tuple(np.concatenate([a, b], axis=0) for a, b in zip(di, sdw))
     return d
 
 
@@ -163,23 +173,24 @@ def _to_desc_order(sites, daggers, weights):
         return sites, daggers, weights
     # check min and max do not over/underflow
     # TODO promote to signed / bigger dtype if necessary
-    xl = sites.min()-1
-    xr = sites.max()+1
+    xl = sites.min() - 1
+    xr = sites.max() + 1
     assert (xl < sites.min()).all()
     assert (xr > sites.max()).all()
 
     # minus because we order descending
-    s0 = -daggers * xr - (1-daggers) * sites
-    s1 = - daggers * sites - (1-daggers)*xl
+    s0 = -daggers * xr - (1 - daggers) * sites
+    s1 = -daggers * sites - (1 - daggers) * xl
 
     perm0 = np.argsort(s0, axis=-1)
     perm1 = np.argsort(s1, axis=-1)
-    a = np.arange(len(sites))[:,None]
-    sites_desc = sites[a, perm0] * (1-daggers) + sites[a, perm1] * daggers
-    weights_desc = weights * (1-2*(parity(perm0) ^ parity(perm1)))
+    a = np.arange(len(sites))[:, None]
+    sites_desc = sites[a, perm0] * (1 - daggers) + sites[a, perm1] * daggers
+    weights_desc = weights * (1 - 2 * (parity(perm0) ^ parity(perm1)))
 
     # TODO also merge duplicates
     return prune(sites_desc, daggers, weights_desc)
+
 
 def to_desc_order(t):
     """
@@ -193,7 +204,8 @@ def to_desc_order(t):
 
     """
     # TODO sum duplicates
-    return {k: _to_desc_order(*v) for k,v in t.items()}
+    return {k: _to_desc_order(*v) for k, v in t.items()}
+
 
 def to_normal_order(t):
     """
@@ -213,22 +225,31 @@ def _split_spin_sectors_helper(sites, daggers, weights, n_orbitals, n_spin_subse
     n_ops = sites.shape[1]
     if n_ops == 0:
         return sites, np.zeros_like(sites), daggers, weights
-    L = np.arange(n_spin_subsectors)*n_orbitals
-    R = np.arange(1, n_spin_subsectors+1)*n_orbitals
-    sectors_mask = ((sites[...,None] >= L) & (sites[...,None] < R)) # n_terms x n_ops x n_spin_subsectors
-    sectors = np.einsum('...i,i', sectors_mask, np.arange(n_spin_subsectors)).astype(np.int32)
+    L = np.arange(n_spin_subsectors) * n_orbitals
+    R = np.arange(1, n_spin_subsectors + 1) * n_orbitals
+    # n_terms x n_ops x n_spin_subsectors
+    sectors_mask = (sites[..., None] >= L) & (sites[..., None] < R)
+    sectors = np.einsum("...i,i", sectors_mask, np.arange(n_spin_subsectors)).astype(
+        np.int32
+    )
     sites = sites - sectors * n_orbitals
     return sites, sectors, daggers, weights
+
 
 def split_spin_sectors(d, n_orbitals, n_spin_subsectors):
     """
     input: { size : (sites, daggers, weights) }
     output: { size : (sites, sectors, daggers, weights) }
     """
-    return {k: _split_spin_sectors_helper(*v, n_orbitals, n_spin_subsectors) for k, v in d.items()}
+    return {
+        k: _split_spin_sectors_helper(*v, n_orbitals, n_spin_subsectors)
+        for k, v in d.items()
+    }
+
 
 def _merge_spin_sectors_helper(sites, sectors, daggers, weights, n_orbitals):
     return sites + sectors * n_orbitals, daggers, weights
+
 
 def merge_spin_sectors(d, n_orbitals):
     """
@@ -237,27 +258,11 @@ def merge_spin_sectors(d, n_orbitals):
     """
     return {k: _merge_spin_sectors_helper(*v, n_orbitals) for k, v in d.items()}
 
+
 def to_normal_order_sector(t, n_spin_subsectors, n_orbitals):
     """convert to normal order with higher sector to the left"""
-    return split_spin_sectors(to_normal_order(merge_spin_sectors(t, n_orbitals)), n_orbitals, n_spin_subsectors)
-
-
-# def arrays_to_fermiop_terms(t):
-#     terms = []
-#     weights = []
-#     for s,d,w in t.values():
-#         terms = terms + np.concatenate([s[..., None],d[..., None]], axis=-1).tolist()
-#         weights = weights + w.tolist()
-#     return terms, weights
-
-
-# test:
-# t = fermiop_terms_to_sites_daggers_weights(ha.terms, ha.weights)
-# ha1 = FermionOperator2nd(hi, *arrays_to_fermiop_terms(t))
-# np.allclose(ha.to_dense(), ha1.to_dense())
-# t_left = move_daggers_left(t)
-# ha2 = FermionOperator2nd(hi, *arrays_to_fermiop_terms(t_left))
-# np.allclose(ha.to_dense(), ha2.to_dense())
-# t_normal = to_desc_order(t_left)
-# ha3 = FermionOperator2nd(hi, *arrays_to_fermiop_terms(t_normal))
-# np.allclose(ha.to_dense(), ha3.to_dense())
+    return split_spin_sectors(
+        to_normal_order(merge_spin_sectors(t, n_orbitals)),
+        n_orbitals,
+        n_spin_subsectors,
+    )

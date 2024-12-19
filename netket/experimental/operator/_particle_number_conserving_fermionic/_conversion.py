@@ -33,15 +33,27 @@ def fermiop_terms_to_sites_daggers_weights(terms, weights):
     out = {}
     for t, w in zip(terms, weights):
         if len(t) == 0:  # constant
-            out[0] = np.zeros((1, 0), dtype=np.int32), np.zeros((1, 0), dtype=np.int8), np.array([w])
+            out[0] = (
+                np.zeros((1, 0), dtype=np.int32),
+                np.zeros((1, 0), dtype=np.int8),
+                np.array([w]),
+            )
         else:
             sites, daggers = np.array(t).T
             l = len(daggers)
             assert l % 2 == 0
             assert 2 * daggers.sum() == l
-            tl, dl, wl= out.get(l, ([], [], []))
+            tl, dl, wl = out.get(l, ([], [], []))
             out[l] = tl + [sites,], dl + [daggers,], wl + [w,]  # fmt: skip
-    return {k: (jnp.array(v[0], dtype=np.int32), jnp.array(v[1], dtype=np.int8), jnp.array(v[2])) for k, v in out.items()}
+    return {
+        k: (
+            jnp.array(v[0], dtype=np.int32),
+            jnp.array(v[1], dtype=np.int8),
+            jnp.array(v[2]),
+        )
+        for k, v in out.items()
+    }
+
 
 def to_fermiop_helper(index_array, create_array, weight_array):
     if index_array is None:  # diagonal
@@ -76,21 +88,24 @@ def to_fermiop_helper(index_array, create_array, weight_array):
     return terms, weights
 
 
-
-
-
-def fermiop_terms_to_sites_sectors_daggers_weights(terms, weights, n_orbitals, n_spin_subsectors):
+def fermiop_terms_to_sites_sectors_daggers_weights(
+    terms, weights, n_orbitals, n_spin_subsectors
+):
     # output: { size : (sites, sectors, daggers, weights) }
-    return split_spin_sectors(fermiop_terms_to_sites_daggers_weights(terms, weights), n_orbitals, n_spin_subsectors)
+    return split_spin_sectors(
+        fermiop_terms_to_sites_daggers_weights(terms, weights),
+        n_orbitals,
+        n_spin_subsectors,
+    )
 
 
 def sites_daggers_weights_to_sparse(sites, daggers, weights, n_orbitals):
     n = daggers.shape[-1]
-    assert n%2 == 0
-    assert (daggers[:, :n//2] == 1).all()
-    assert (daggers[:, n//2:] == 0).all()
+    assert n % 2 == 0
+    assert (daggers[:, : n // 2] == 1).all()
+    assert (daggers[:, n // 2 :] == 0).all()
     # TODO cutoff?
-    return sparse.COO(sites.T, weights, shape=(n_orbitals,)*n)
+    return sparse.COO(sites.T, weights, shape=(n_orbitals,) * n)
 
 
 def _insert_append_helper(d, k, s, o, cutoff):
@@ -98,12 +113,21 @@ def _insert_append_helper(d, k, s, o, cutoff):
     # if yes append to the list of sectors
     # else insert new element into the dict
     for (k2, s2), o2 in d.items():
-        # and same number of sectors, same number of fermionic operators, same matrix (up to cutoff)
-        if ((s==() and s2 == ()) or (len(s2)>0 and len(s)>0 and  len_helper(s2[0]) == len_helper(s[0]))) and k==k2 and sparse.abs(o-o2).max() < cutoff :
-            d[k, s2+s] = d.pop((k2, s2))
+        same_number_of_sectors = (s == () and s2 == ()) or (
+            len(s2) > 0 and len(s) > 0 and len_helper(s2[0]) == len_helper(s[0])
+        )
+        same_number_of_fermionic_operators = k == k2
+        same_matrix = sparse.abs(o - o2).max() < cutoff
+        if (
+            same_number_of_sectors
+            and same_number_of_fermionic_operators
+            and same_matrix
+        ):
+            d[k, s2 + s] = d.pop((k2, s2))
             break
     else:
         d[k, s] = o
+
 
 def to_operators_sector(tno_sector, n_spin_subsectors, n_orbitals, cutoff=1e-11):
     r"""
@@ -121,10 +145,12 @@ def to_operators_sector(tno_sector, n_spin_subsectors, n_orbitals, cutoff=1e-11)
 
     for k, (sites, sectors, daggers, weights) in tno_sector.items():
         for i in range(n_spin_subsectors):
-            if not (((2*daggers-1)*(sectors==i)).sum(axis=-1) == 0).all():
-                raise ValueError # does not conserve particle number per sector
+            if not (((2 * daggers - 1) * (sectors == i)).sum(axis=-1) == 0).all():
+                raise ValueError  # does not conserve particle number per sector
 
-        sector_count = jax.vmap(partial(jnp.bincount, length=n_spin_subsectors))(sectors)
+        sector_count = jax.vmap(partial(jnp.bincount, length=n_spin_subsectors))(
+            sectors
+        )
 
         # merge sectors which have same sparse matrix
 
@@ -134,19 +160,23 @@ def to_operators_sector(tno_sector, n_spin_subsectors, n_orbitals, cutoff=1e-11)
             # at this point we know there is only one sector this acts on
             sector = sectors[:, 0]  # = sectors[:, 1]
             for i in np.unique(sector):
-                m = sector==i
-                o = sites_daggers_weights_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
+                m = sector == i
+                o = sites_daggers_weights_to_sparse(
+                    sites[m], daggers[m], weights[m], n_orbitals=n_orbitals
+                )
                 _insert_append_helper(operators_sector, k, (i,), o, cutoff)
         elif k == 4:
             # at this point we know that n_sectors_acting_on \in 1,2
             n_sectors_acting_on = np.count_nonzero(sector_count, axis=-1)
 
             # all same sector
-            m_same = n_sectors_acting_on==1
+            m_same = n_sectors_acting_on == 1
             sector = sectors[:, 0]
             for i in np.unique(sector[m_same]):
                 m = (sector == i) & m_same
-                o = sites_daggers_weights_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
+                o = sites_daggers_weights_to_sparse(
+                    sites[m], daggers[m], weights[m], n_orbitals=n_orbitals
+                )
                 _insert_append_helper(operators_sector, k, (i,), o, cutoff)
 
             m_different = ~m_same
@@ -156,7 +186,9 @@ def to_operators_sector(tno_sector, n_spin_subsectors, n_orbitals, cutoff=1e-11)
                 m = (sector == ij[None]).all(axis=-1) & m_different
                 # minus sign because in the operator (_get_conn_padded_interaction_up_down) we assume it's swaped to (assuming σ>ρ)
                 # cσ^† cσ cρ^† cρ = - cσ^† cρ^† cσ cρ
-                o = - sites_daggers_weights_to_sparse(sites[m], daggers[m], weights[m], n_orbitals=n_orbitals)
+                o = -sites_daggers_weights_to_sparse(
+                    sites[m], daggers[m], weights[m], n_orbitals=n_orbitals
+                )
                 _insert_append_helper(operators_sector, k, (tuple(ij),), o, cutoff)
         else:
             raise NotImplementedError
