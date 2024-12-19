@@ -288,7 +288,31 @@ def _len(s):
 @struct.dataclass
 class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
     """
-    H = a + Σ_ijσ b_ij c_iσ^† c_jσ + Σ_ijklσρ c_ijkl  c_iσ^† c_jρ^† c_kρ c_lσ
+    Particle-number conserving fermionc operator
+    H = w + Σ_ijσ w_ijσ c_iσ^† c_jσ + Σ_ijklσρ w_ijklσρ  c_iσ^† c_jρ^† c_kρ c_lσ
+
+    Version with spin.
+
+    To be used with netket.hilbert.SpinOrbitalFermions with a fixed number of fermions.
+
+    It uses a custom sparse internal representation,
+    please refer to the docstrings of prepare_data and prepare_data_diagonal for details.
+
+    We provide several factory methods to create this operator:
+        - ParticleNumberConservingFermioperator2ndSpinJax.from_fermiop:
+                Conversion form FermionOperator2nd/FermionOperator2ndJax (if possible)
+        - ParticleNumberConservingFermioperator2ndSpinJax.from_sparse_arrays:
+                From sparse arrays for w, w_ij and w_ijkl specifying the spin sectors σ,ρ explicitly
+        - ParticleNumberConservingFermioperator2ndSpinJax.from_sparse_arrays_all_sectors:
+                From sparse arrays for w, w_ij and w_ijkl summing over all possible values of σ,ρ
+        - ParticleNumberConservingFermioperator2ndJax.from_pyscf_molecule:
+                From pyscf
+        - ParticleNumberConservingFermioperator2ndSpinJax.from_sites_sectors_daggers_weights:
+                From a dictionary of tuples {k: (sites, daggers, weights, sectors)} representing w, w_ijσ, w_ijklσρ
+        - ParticleNumberConservingFermioperator2ndSpinJax.from_coords_data:
+                From a dictionary of tuples {(k, sectors): (sites, daggers, weights)} representing w, w_ijσ, w_ijklσρ
+
+    Furthermore it can be converted to FermionOperator2nd/FermionOperator2ndJax using the .to_fermiop method.
     """
     _hilbert: SpinOrbitalFermions = struct.field(pytree_node=False)
     _operator_data: PyTree
@@ -325,12 +349,17 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
 
     @classmethod
     def from_sparse_arrays(cls, hilbert, operators_sector):
-        # operators_sector is a dict with
-        # key: a tuple (k, sectors)
-        #      where k is the number of c/c^†
-        #      and sectors is a tuple of tuples/numbers containing the index / sets of indices of sectors the operator is acting on
-        #      each element of sectors needs to be ordered in descending order
-        # value: a sparse matrix of coefficeints of shape (n_orbitals,)*k
+        """
+        Args:
+            operators_sector:
+                dict {key: value}
+                    key: a tuple (k, sectors)
+                         where k is the number of c/c^†
+                         and sectors is a tuple of tuples/numbers containing the index / sets
+                         of indices of sectors the operator is acting on each element
+                         of sectors needs to be ordered in descending order
+                    value: a sparse matrix of coefficeints of shape (n_orbitals,)*k
+        """
 
         # convert sparse arrays to coords+data tuple
         coords_data_sectors = _sparse_arrays_to_coords_data_dict2(operators_sector)
@@ -338,6 +367,16 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
 
     @classmethod
     def from_sparse_arrays_all_sectors(cls, hilbert, operators, cutoff=1e-11):
+        """
+            Construct the operator from  sparse arrays for w, w_ij and w_ijkl summing over all possible values of σ,ρ,
+
+            H = w + Σ_ijσ w_ij c_iσ^† c_jσ + Σ_ijklσρ w_ijkl c_iσ^† c_jρ^† c_kρ c_lσ
+
+            Args:
+                hilbert: hilbert space
+                operators: a list of sparse arrays representing w, w_ij and w_ijkl
+                cutoff: cutoff on the matirx elements, default=1e-11
+        """
         # operators = [const, hij, hijkl]
         # ops = {0: const, 2: hij_sparse, 4: hijkl_sparse}
         ops = _collect_ops(operators)
@@ -362,6 +401,14 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
 
     @classmethod
     def from_pyscf_molecule(cls, mol, mo_coeff, cutoff=1e-11):
+        """
+        Constructs the operator from a pyscf molecule
+
+        Args:
+            mol: pyscf molecule
+            mo_coeff: coefficients
+                e.g. run
+        """
         n_orbitals = int(mol.nao)
         hilbert = SpinOrbitalFermions(n_orbitals, s=1 / 2, n_fermions_per_spin=mol.nelec)
 

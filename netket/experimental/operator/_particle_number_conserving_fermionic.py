@@ -363,7 +363,7 @@ def _fermiop_terms_to_sites_daggers_weights(terms, weights):
 
     Args:
         terms: terms as specified in FermionOperator2nd/FermionOperator2ndJax
-        weights: a list of weights 
+        weights: a list of weights
     Returns:
         a dictionary {k: (sites, daggers, weights)}
         where for every set of operators of length k
