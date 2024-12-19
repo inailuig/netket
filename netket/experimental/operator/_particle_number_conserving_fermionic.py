@@ -1,4 +1,4 @@
-from functools import partial
+from functools import partial, wraps
 
 import numpy as np
 import sparse
@@ -20,7 +20,7 @@ from ._pyscf_utils import TV_from_pyscf_molecule
 
 from netket.experimental.operator._pyscf_utils import to_desc_order_sparse
 
-def _prepare_data(sites_destr, sites_create, weights, n_orbitals, _sparse=True):
+def _prepare_data_helper(sites_destr, sites_create, weights, n_orbitals, sparse_=True):
     # we encode sites_create==sites_destr by passing sites_create=None
     is_diagonal = sites_create is None
 
@@ -46,7 +46,7 @@ def _prepare_data(sites_destr, sites_create, weights, n_orbitals, _sparse=True):
             jnp.asarray(tmp.data),
             (n_orbitals,) * (half_n_ops),
         )
-        if not _sparse:
+        if not sparse_:
             weight_array = weight_array.todense()
     else:
         assert sites_destr.max() < n_orbitals
@@ -100,18 +100,73 @@ def _prepare_data(sites_destr, sites_create, weights, n_orbitals, _sparse=True):
             jnp.arange(1, len(destr_unique) + 1),
             (n_orbitals,) * (half_n_ops),
         )
-        if not _sparse:
+        if not sparse_:
             index_array = index_array.todense()
 
     return index_array, create_array, weight_array
 
 
 def prepare_data_diagonal(sites_destr, weights, n_orbitals, **kwargs):
-    # sites_destr needs to contain the sites only once, not twice!!
-    return _prepare_data(sites_destr, None, weights, n_orbitals, **kwargs)
+    """
+
+    Prepare the custom sparse internal data for ParticleNumberConservingFermioperator2ndJax, for the diagonal part of the operator
+
+    Assume we are given a sequence of equal-length normal ordered strings \sum_i w_i c_{a_i1}^\dagger ... c_{a_iN}^\dagger c_{a_i1} ... c_{a_iN}
+    with 2N fermionic operators, with larger indices to the left: a_i1 >=...>=a_iN
+
+    Please refer to the docstring of prepare_data for a more complete explanation of the storage format.
+
+    We can treat the diagonal opeators separately to the non-diagonal ones in a more efficient way:
+        index_array: None
+        create_array: None
+        weight_array: shape (n,)*N  is indexed directly with the list of destruction operators (given by b above)
+
+    Args:
+        sites_destr: a matrix containing the indices of c^dagger/c for every string [[a_i1, ..., a_iN]] ()
+        weights: array of the corresponding weights [w_i]
+        n_orbitals: number of orbitals n
+        sparse_: whether to store weight_array in dense or sparse
+    Returns:
+        A tuple (index_array, create_array, weight_array) as defined above
+
+    """
+    return _prepare_data_helper(sites_destr, None, weights, n_orbitals, **kwargs)
 
 
 def prepare_data(sites, weights, n_orbitals, **kwargs):
+    """
+    Prepare the custom sparse internal data for ParticleNumberConservingFermioperator2ndJax
+
+    It is given by a 3-tuple for every length N of string in normal ordering (containg 2N fermionic operators),
+
+    Assume we are given a sequence of equal-length normal ordered strings \sum_i w_i c_{a_i1}^\dagger ... c_{a_iN}^\dagger c_{b_i1} ... c_{b_iN}
+    with 2N fermionic operators, with larger indices to the left: a_i1 >=...>=a_iN, b_i1 >=...>=b_iN
+
+    Here a \in {1..n} contains the indices of the c^\dagger, b the indices of the c operators and w the corresponding weight of every string.
+    where n is the number of orbitals.
+
+    The 3-tuple for these operators is given by
+        index_array: shape (n,)*N+(n_max,) contains list of integer indices for all the strings for a given list of destruction operators (given by b above)
+                     can be stored either in a dense, or sparse format; is padded to the maximum number of operators n_max for a given sequence of destruction ops (b)
+                     Since the operators are assumed to be in normal order (larger sites to the left) only the lower triangular part is used.
+        create_array: shape (n_ops+1,)+(N,) for every index from index_array contains creation operators of the corresponding term (given by a above)
+        weight_array: shape (n_ops+1,)+(1,) for every index from index_array contains the weight of the corresponding term
+                      The 0 weight for the padding is stored as the last element.
+
+    Then for a given basis state |b_1,...,b_m> (where b_j indicates the occupied orbitals, for a fixed number of electrons m) we find all the connected elements
+    by taking all m choose N combinations of occupied orbitals to be destroyed as index for index_array, excluding the strings which try to destroy an empty orbital.
+
+
+    Args:
+        sites: a matrix containing the indices of c^dagger and c for every string [[a_i1, ..., a_iN, b_i1, ..., b_iN]]
+        weights: array of the corresponding weights [w_i]
+        n_orbitals: number of orbitals n
+        sparse_: wether to store index_array in dense or sparse
+    Returns:
+        A tuple (index_array, create_array, weight_array) as defined above
+
+    """
+
     # sites is an array (n_terms, n_ops) containing the sites
     # of terms in normal order (daggers to left, desc order)
     #
@@ -120,7 +175,7 @@ def prepare_data(sites, weights, n_orbitals, **kwargs):
     assert n_ops % 2 == 0
     sites_destr = sites[:, : n_ops // 2]
     sites_create = sites[:, n_ops // 2 :]
-    return _prepare_data(sites_destr, sites_create, weights, n_orbitals, **kwargs)
+    return _prepare_data_helper(sites_destr, sites_create, weights, n_orbitals, **kwargs)
 
 
 def split_diag_offdiag(sites, weights):
@@ -300,7 +355,7 @@ def _collect_ops(operators):
             ops[k] = A
     return ops
 
-def _sparse_arrays_to_coords_data_dict(ops):
+def sparse__arrays_to_coords_data_dict(ops):
     const = ops.pop(0, None)
     coords_data_dict = {A.ndim: (A.coords.T, A.data) for A in ops.values()}
     if const is not None:
@@ -309,7 +364,7 @@ def _sparse_arrays_to_coords_data_dict(ops):
 
 
 def _prepare_operator_data_from_coords_data_dict(
-    coords_data_dict, n_orbitals, **kwargs
+coords_data_dict, n_orbitals, **kwargs
 ):
     # n_fermions = hi.n_fermions
     data_offdiag = {}
@@ -327,12 +382,37 @@ def _prepare_operator_data_from_coords_data_dict(
 @struct.dataclass
 class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
     """
-    H = a + Σ_ij b_ij c_i^† c_j + Σ_ijkl c_ijkl  c_i^† c_j^† c_k c_l + Σ_ijklmn c_ijklmn c_i^† c_j^† c_k^† c_l c_m c_n + ...
+    Particle-number conserving fermionc operator
+    H = w + Σ_ij w_ij c_i^† c_j + Σ_ijkl w_ijkl  c_i^† c_j^† c_k c_l + Σ_ijklmn w_ijklmn c_i^† c_j^† c_k^† c_l c_m c_n + ...
+
+    Version without spin.
+
+    To be used with netket.hilbert.SpinOrbitalFermions with a fixed number of fermions.
+
+    It uses a custom sparse internal representation,
+    please refer to the docstrings of prepare_data and prepare_data_diagonal.
+
+    We provide several factory methods to create this operator:
+        - ParticleNumberConservingFermioperator2ndJax.from_fermiop:
+               Conversion form FermionOperator2nd/FermionOperator2ndJax
+        - ParticleNumberConservingFermioperator2ndJax.from_sparse_arrays_normal_order:
+                From sparse arrays (w, w_ij, w_ijkl, w_ijklmn) where i>=j, i>=j>=k>=l etc,
+                and only the lower triangular part is nonzero
+        - ParticleNumberConservingFermioperator2ndJax.from_coords_data_normal_order:
+                From tuples of (sites, daggers, weights) representing w, w_ij, ...
+                where only the lower triangular part is nonzero
+        - ParticleNumberConservingFermioperator2ndJax.from_sparse_arrays:
+                From tuples of matrices (sites, daggers, weights) representing w, w_ij, ...
+        - ParticleNumberConservingFermioperator2ndJax.from_pyscf_molecule:
+                From pyscf
+
+    Furthermore it can be converted to FermionOperator2nd/FermionOperator2ndJax using the .to_fermiop method.
     """
     _hilbert: SpinOrbitalFermions = struct.field(pytree_node=False)
-    _operator_data: PyTree
+    _operator_data: PyTree # custom sparse internal representation
 
     @jax.jit
+    @wraps(DiscreteJaxOperator.get_conn_padded)
     def get_conn_padded(self, x):
         dtype = x.dtype
         if not jnp.issubdtype(dtype, jnp.integer) or jnp.issubdtype(dtype, jnp.integer):
@@ -371,7 +451,8 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
     @property
     def is_hermitian(self):
         # TODO actually check it is
-        return True
+        # return True
+        return NotImplemented
 
     @classmethod
     def from_coords_data_normal_order(cls, hilbert, coords_data_dict, **kwargs):
@@ -385,7 +466,7 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
 
     @classmethod
     def from_sparse_arrays_normal_order(cls, hilbert, operators, **kwargs):
-        terms = _sparse_arrays_to_coords_data_dict(_collect_ops(operators))
+        terms = sparse__arrays_to_coords_data_dict(_collect_ops(operators))
 
         for k, v in terms.items():
             if k <= 2:
@@ -405,7 +486,7 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
         ops = _collect_ops(operators)
         cutoff = kwargs.get('cutoff', 0)
         ops = jax.tree_util.tree_map(partial(to_desc_order_sparse, cutoff=cutoff), ops)
-        terms = _sparse_arrays_to_coords_data_dict(ops)
+        terms = sparse__arrays_to_coords_data_dict(ops)
         return cls.from_coords_data_normal_order(hilbert, terms, **kwargs)
 
     @classmethod

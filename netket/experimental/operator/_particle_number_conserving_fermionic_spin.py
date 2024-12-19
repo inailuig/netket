@@ -300,7 +300,8 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
     @property
     def is_hermitian(self):
         # TODO actually check it is
-        return True
+        # return True
+        return NotImplemented
 
     @property
     @jax.jit
@@ -309,6 +310,7 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
         _, mels = jax.eval_shape(self.get_conn_padded, x)
         return mels.shape[-1]
 
+    @wraps(DiscreteJaxOperator.get_conn_padded)
     def get_conn_padded(self, x):
         return get_conn_padded_pnc_spin(self._operator_data, x, self._hilbert.n_fermions_per_spin)
 
