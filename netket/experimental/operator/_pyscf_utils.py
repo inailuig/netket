@@ -8,7 +8,7 @@ import jax.numpy as jnp
 
 from netket.utils.optional_deps import import_optional_dependency
 
-from ._normal_order_utils import parity
+from ._particle_number_conserving_fermionic._normal_order_utils import parity
 
 
 def compute_pyscf_integrals(mol, mo_coeff):
