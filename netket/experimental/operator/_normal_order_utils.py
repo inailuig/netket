@@ -5,14 +5,19 @@ from netket.experimental.operator._pyscf_utils import _parity
 
 
 def prune(sites, daggers, weights):
-    # remove ci ci and ci+ci+ on the same site i
+    """
+    remove ĉᵢĉᵢ and ĉᵢ†ĉᵢ† on the same site i
+    """
     mask = ~((np.diff(daggers, axis=-1) == 0) & (np.diff(sites, axis=-1) == 0)).any(axis=-1)
     return sites[mask], daggers[mask], weights[mask]
 
-def move(i, j, x, mask=None):
+def _move(i, j, x, mask=None):
+    """
+    move element i after element j on the last axis (batched)
+    use the mask parameter to only selectively move some elements in the batch
+    """
     n = x.shape[-1]
     a = np.arange(n)[None]
-    # move i after j
     masklr = (a<i) | (a>j)
     maskj = a == j
     mask_middle = ~(masklr | maskj)
@@ -23,10 +28,12 @@ def move(i, j, x, mask=None):
         return res
     return res * mask + (~mask)*x
 
-def remove(i, j, x):
+def _remove(i, j, x):
+    """
+    remove element i and j on the last axis (batched)
+    """
     n = x.shape[-1]
     a = np.arange(n)[None]
-    # remove i and j
     maskl = a<i
     maskr = a>j-2
     mask_middle = ~(maskl | maskr)
@@ -35,21 +42,38 @@ def remove(i, j, x):
     return (maskl * x + mask_middle * x1 + maskr * x2)[..., :-2]
 
 
-def _move_daggers_left(sites_, daggers_, weights_):
+def _move_daggers_left(sites, daggers, weights):
+    """
+    apply the fermionic anticommutation rules to recursively bring a set of
+    fermionic operators (all of same length) into normal ordering (daggers to the left)
+
+    Returns a list of ((sites, daggers, weights), (sites, daggers, weights), ...)
+    of operators with the same length, length-2, ..., length 0
+    """
+
+    # TODO
+    # re-implement non-recursively using Wick thm
+
     n = daggers_.shape[-1]
     if n == 0:
-        return (sites_, daggers_, weights_),
+        return (sites, daggers, weights),
+
+    sites_ = sites
+    daggers_ = daggers
+    weights_ = weights
+
     new_sites_smaller = []
     new_daggers_smaller = []
     new_weights_smaller = []
+
     while True:
         a = np.arange(n)[None]
         # find leftmost c
         i = np.argmin(daggers_,axis=1, keepdims=True)
-        # find next dagger
+        # find next c^\dagger
         j = np.argmax((i < a) & daggers_,axis=1, keepdims=True)
 
-        # now move the c after the dagger if necessary
+        # now move the c after the c^\dagger if necessary
 
         do_move = j > i
         if ~do_move.any():
@@ -60,20 +84,22 @@ def _move_daggers_left(sites_, daggers_, weights_):
         si = np.take_along_axis(sites_, i, 1)
         sj = np.take_along_axis(sites_, j, 1)
 
-        new_sites = move(i, j, sites_, mask=do_move)
-        new_daggers = move(i, j, daggers_, mask=do_move)
+        new_sites = _move(i, j, sites_, mask=do_move)
+        new_daggers = _move(i, j, daggers_, mask=do_move)
         new_weights = weights_ * sign
 
         same = ((si==sj) & do_move).ravel()
-        new_sites2 = remove(i[same], j[same], sites_[same])
-        new_daggers2 = remove(i[same], j[same], daggers_[same])
+        new_sites2 = _remove(i[same], j[same], sites_[same])
+        new_daggers2 = _remove(i[same], j[same], daggers_[same])
         new_weights2 = -(weights_ * sign)[same]
         new_sites2, new_daggers2, new_weights2 = prune(new_sites2, new_daggers2, new_weights2)
+
         if len(new_sites2) > 0:
             new_sites_smaller.append(new_sites2)
             new_daggers_smaller.append(new_daggers2)
             new_weights_smaller.append(new_weights2)
-        # set var for next iteration
+
+        # set variables for next iteration
         sites_, daggers_, weights_ = prune(new_sites, new_daggers, new_weights)
 
     if len(new_sites_smaller) > 0:
@@ -86,6 +112,16 @@ def _move_daggers_left(sites_, daggers_, weights_):
         return (sites_, daggers_, weights_),
 
 def move_daggers_left(t):
+    """
+    Apply the fermionic anticommutation rules to recursively bring a set of
+    fermionic operators into normal ordering (daggers to the left)
+
+    t: a dictionary containing strings of different lengths, each stored as a tuple
+    (sites, daggers, weights)
+
+    Returns: a new dictionary with normal ordered strings
+
+    """
     d = {}
     for sdw in [x for v in t.values() for x in _move_daggers_left(*v)]:
         k = sdw[0].shape[-1]
@@ -98,24 +134,28 @@ def move_daggers_left(t):
     return d
 
 
-def _to_desc_order(sites_, daggers_, weights_):
-    n = daggers_.shape[-1]
+def _to_desc_order(sites, daggers, weights):
+    """
+    Reorder operators (all of same length) such that the ones with the larger site index are to the left
+    Assumes the operators are already in normal order (daggers to the left).
+    """
+    n = daggers.shape[-1]
     if n == 0:
-        return sites_, daggers_, weights_
+        return sites, daggers, weights
     # check min and max do not over/underflow
     # TODO promote to signed / bigger dtype if necessary
-    xl = sites_.min()-1
-    xr = sites_.max()+1
-    assert (xl < sites_.min()).all()
-    assert (xr > sites_.max()).all()
+    xl = sites.min()-1
+    xr = sites.max()+1
+    assert (xl < sites.min()).all()
+    assert (xr > sites.max()).all()
 
     # minus because we order descending
-    s0 = -daggers_ * xr - (1-daggers_) * sites_
-    s1 = - daggers_ * sites_ - (1-daggers_)*xl
+    s0 = -daggers_ * xr - (1-daggers_) * sites
+    s1 = - daggers_ * sites - (1-daggers_)*xl
 
     perm0 = np.argsort(s0, axis=-1)
     perm1 = np.argsort(s1, axis=-1)
-    a = np.arange(len(sites_))[:,None]
+    a = np.arange(len(sites))[:,None]
     sites_desc = sites_[a, perm0] * (1-daggers_) + sites_[a, perm1] * daggers_
     weights_desc = weights_ * (1-2*(_parity(perm0) ^ _parity(perm1)))
 
@@ -123,11 +163,30 @@ def _to_desc_order(sites_, daggers_, weights_):
     return prune(sites_desc, daggers_, weights_desc)
 
 def to_desc_order(t):
-    # assumes daggers are already left
+    """
+    Reorder operators such that the ones with the larger site index are to the left
+    Assumes the operators are already in normal order (daggers to the left).
+
+    t: a dictionary containing strings of different lengths, each stored as a tuple
+    (sites, daggers, weights)
+
+    Returns: a new dictionary with strings in descending order
+
+    """
     # TODO sum duplicates
     return {k: _to_desc_order(*v) for k,v in t.items()}
 
 def to_normal_order(t):
+    """
+    Apply the fermionic anticommutation rules to recursively bring a set of
+    fermionic operators into normal ordering (daggers to the left), then
+    reorder operators such that the ones with the larger site index are to the left
+
+    t: a dictionary containing strings of different lengths, each stored as a tuple
+    (sites, daggers, weights)
+
+    Returns: a new dictionary with strings in descending normal order
+    """
     return to_desc_order(move_daggers_left(t))
 
 # test:
