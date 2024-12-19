@@ -310,3 +310,102 @@ def prepare_operator_data_from_coords_data_dict_spin(coords_data_sectors, n_orbi
         "mixed_offdiag": data_offdiag_mixed,
     }
     return operator_data
+
+
+
+def sites_daggers_weights_to_sparse(sites, daggers, weights, n_orbitals):
+    n = daggers.shape[-1]
+    assert n % 2 == 0
+    assert (daggers[:, : n // 2] == 1).all()
+    assert (daggers[:, n // 2 :] == 0).all()
+    # TODO cutoff?
+    return sparse.COO(sites.T, weights, shape=(n_orbitals,) * n)
+
+
+def _insert_append_helper(d, k, s, o, cutoff):
+    # check if an element with the same matrix but different sectors exist
+    # if yes append to the list of sectors
+    # else insert new element into the dict
+    for (k2, s2), o2 in d.items():
+        same_number_of_sectors = (s == () and s2 == ()) or (
+            len(s2) > 0 and len(s) > 0 and len_helper(s2[0]) == len_helper(s[0])
+        )
+        same_number_of_fermionic_operators = k == k2
+        same_matrix = sparse.abs(o - o2).max() < cutoff
+        if (
+            same_number_of_sectors
+            and same_number_of_fermionic_operators
+            and same_matrix
+        ):
+            d[k, s2 + s] = d.pop((k2, s2))
+            break
+    else:
+        d[k, s] = o
+
+
+def to_coords_data_sector(tno_sector, n_spin_subsectors, n_orbitals, cutoff=1e-11):
+    r"""
+    Args:
+        tno_sector: a list of tuples [(sites, sectors, daggers, weights)]
+                    of terms in normal order with higher sectors on the left
+
+    Returns: a dict {(k, sectors) : (indices, data)}
+             where k is the number of c/c^\dagger,
+             sectors are the spin sectors acted on,
+             indices contains the sites inside of each sector
+             and data contains the weights
+    """
+
+    operators_sector = {}
+
+    for k, (sites, sectors, daggers, weights) in tno_sector.items():
+        for i in range(n_spin_subsectors):
+            if not (((2 * daggers - 1) * (sectors == i)).sum(axis=-1) == 0).all():
+                raise ValueError  # does not conserve particle number per sector
+
+        sector_count = jax.vmap(partial(jnp.bincount, length=n_spin_subsectors))(
+            sectors
+        )
+
+        # merge sectors which have same sparse matrix
+
+        if k == 0:
+            operators_sector[0, ()] = weights.reshape(())
+        elif k == 2:
+            # at this point we know there is only one sector this acts on
+            sector = sectors[:, 0]  # = sectors[:, 1]
+            for i in np.unique(sector):
+                m = sector == i
+                o = sites_daggers_weights_to_sparse(
+                    sites[m], daggers[m], weights[m], n_orbitals=n_orbitals
+                )
+                _insert_append_helper(operators_sector, k, (i,), o, cutoff)
+        elif k == 4:
+            # at this point we know that n_sectors_acting_on \in 1,2
+            n_sectors_acting_on = np.count_nonzero(sector_count, axis=-1)
+
+            # all same sector
+            m_same = n_sectors_acting_on == 1
+            sector = sectors[:, 0]
+            for i in np.unique(sector[m_same]):
+                m = (sector == i) & m_same
+                o = sites_daggers_weights_to_sparse(
+                    sites[m], daggers[m], weights[m], n_orbitals=n_orbitals
+                )
+                _insert_append_helper(operators_sector, k, (i,), o, cutoff)
+
+            m_different = ~m_same
+            sector = sectors[:, :2]
+            # i > j because we made it normal order (with site shifted by N*spin) above
+            for ij in np.unique(sector[m_different], axis=0):
+                m = (sector == ij[None]).all(axis=-1) & m_different
+                # minus sign because in the operator (_get_conn_padded_interaction_up_down) we assume it's swaped to (assuming σ>ρ)
+                # cσ^† cσ cρ^† cρ = - cσ^† cρ^† cσ cρ
+                o = -sites_daggers_weights_to_sparse(
+                    sites[m], daggers[m], weights[m], n_orbitals=n_orbitals
+                )
+                _insert_append_helper(operators_sector, k, (tuple(ij),), o, cutoff)
+        else:
+            raise NotImplementedError
+
+    return sparse_arrays_to_coords_data_dict(operators_sector)
