@@ -49,7 +49,7 @@ def test_pnc(desc):
     weights = weights + list(hijklmn[ijklmn])
     ha = FermionOperator2nd(hi, terms=terms, weights=weights)
     if desc:
-        factory = ParticleNumberConservingFermioperator2ndJax.from_sparse_arrays_normal_order
+        factory = ParticleNumberConservingFermioperator2ndJax._from_sparse_arrays_normal_order
     else:
         factory = ParticleNumberConservingFermioperator2ndJax.from_sparse_arrays
     ha2 = factory(hi, [c, hij*(jnp.abs(hij) > cutoff), hijkl*(jnp.abs(hijkl) > cutoff), hijklmn*(jnp.abs(hijklmn) > cutoff)])
@@ -94,7 +94,7 @@ def test_pnc_spin(N, n, s):
             weights = weights + list(hijkl[ijkl])
     ha = FermionOperator2nd(hi, terms=terms, weights=weights)
 
-    ha2 = ParticleNumberConservingFermioperator2ndSpinJax._from_sparse_arrays_all_sectors(hi, [c, hij*(jnp.abs(hij) > cutoff), hijkl*(jnp.abs(hijkl) > cutoff)])
+    ha2 = ParticleNumberConservingFermioperator2ndSpinJax._from_sparse_arrays_normal_order_all_sectors(hi, [c, hij*(jnp.abs(hij) > cutoff), hijkl*(jnp.abs(hijkl) > cutoff)])
     np.testing.assert_allclose(ha.to_dense(), ha2.to_dense())
 
     ha3 = ParticleNumberConservingFermioperator2ndSpinJax.from_fermiop(ha)

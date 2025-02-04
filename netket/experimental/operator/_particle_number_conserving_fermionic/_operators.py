@@ -9,21 +9,20 @@ import jax.numpy as jnp
 from flax import struct
 
 from netket.operator import DiscreteJaxOperator
-from netket.experimental.hilbert import SpinOrbitalFermions
+from netket.hilbert import SpinOrbitalFermions
 from netket.utils.types import PyTree
+from netket.operator import FermionOperator2ndJax
 
-from .._fermion_operator_2nd_jax import FermionOperator2ndJax
 from .._pyscf_utils import (
     TV_from_pyscf_molecule,
     to_desc_order_sparse,
     compute_pyscf_integrals,
 )
 
-from ._normal_order_utils import to_normal_order, to_normal_order_sector
+from .._normal_order_utils import to_normal_order, to_normal_order_sector
 from ._conversion import (
     fermiop_terms_to_sites_daggers_weights,
     fermiop_terms_to_sites_sectors_daggers_weights,
-    to_coords_data_sector,
     to_fermiop_helper,
 )
 from ._operator_data import (
@@ -31,6 +30,7 @@ from ._operator_data import (
     sparse_arrays_to_coords_data_dict,
     prepare_operator_data_from_coords_data_dict,
     prepare_operator_data_from_coords_data_dict_spin,
+    to_coords_data_sector,
 )
 from ._kernels import get_conn_padded_pnc, get_conn_padded_pnc_spin
 
@@ -178,7 +178,7 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
     # factory methods for internal use only:
     # - ParticleNumberConservingFermioperator2ndSpinJax._from_sites_sectors_daggers_weights:
     #         From a dictionary of tuples {k: (sites, sectors, daggers, weights)} representing w, w_ijσ, w_ijklσ
-    # - ParticleNumberConservingFermioperator2ndSpinJax._from_sparse_arrays_all_sectors:
+    # - ParticleNumberConservingFermioperator2ndSpinJax._from_sparse_arrays_normal_order_all_sectors:
     #         From sparse arrays for w, w_ij and w_ijkl summing over all possible values of σ,ρ
     # - ParticleNumberConservingFermioperator2ndSpinJax._from_coords_data:
     #         From a dictionary of tuples {(k, sectors): (sites, daggers, weights)} representing w, w_ijσ, w_ijklσρ
