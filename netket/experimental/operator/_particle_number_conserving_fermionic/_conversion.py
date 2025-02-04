@@ -10,7 +10,7 @@ import jax.numpy as jnp
 
 from netket.jax import COOTensor
 
-from ._normal_order_utils import split_spin_sectors
+from .._normal_order_utils import split_spin_sectors
 
 
 # TODO merge this with fermionoperator2nd prepare_terms_list

@@ -1,9 +1,10 @@
 # utilities to prepare the internal datastructures
 
-
+from functools import partial
 import numpy as np
 import sparse
 
+import jax
 import jax.numpy as jnp
 
 from netket.jax import COOTensor
@@ -330,12 +331,10 @@ def _insert_append_helper(d, k, s, o, cutoff):
         same_number_of_sectors = (s == () and s2 == ()) or (
             len(s2) > 0 and len(s) > 0 and len_helper(s2[0]) == len_helper(s[0])
         )
-        same_number_of_fermionic_operators = k == k2
-        same_matrix = sparse.abs(o - o2).max() < cutoff
         if (
             same_number_of_sectors
-            and same_number_of_fermionic_operators
-            and same_matrix
+            and k == k2 # same_number_of_fermionic_operators
+            and sparse.abs(o - o2).max() < cutoff # same_matrix
         ):
             d[k, s2 + s] = d.pop((k2, s2))
             break
