@@ -58,6 +58,7 @@ class ParticleNumberConservingFermioperator2ndJax(DiscreteJaxOperator):
 
     Furthermore it can be converted to FermionOperator2nd/FermionOperator2ndJax using the .to_fermiop method.
     """
+
     # factory methods for internal use only:
     # - ParticleNumberConservingFermioperator2ndJax._from_coords_data_normal_order:
     #         From tuples of (sites, daggers, weights) representing w, w_ij, ...
@@ -175,6 +176,7 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
                 From pyscf
     Furthermore it can be converted to FermionOperator2nd/FermionOperator2ndJax using the .to_fermiop method.
     """
+
     # factory methods for internal use only:
     # - ParticleNumberConservingFermioperator2ndSpinJax._from_sites_sectors_daggers_weights:
     #         From a dictionary of tuples {k: (sites, sectors, daggers, weights)} representing w, w_ijσ, w_ijklσ
@@ -182,7 +184,6 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
     #         From sparse arrays for w, w_ij and w_ijkl summing over all possible values of σ,ρ
     # - ParticleNumberConservingFermioperator2ndSpinJax._from_coords_data:
     #         From a dictionary of tuples {(k, sectors): (sites, daggers, weights)} representing w, w_ijσ, w_ijklσρ
-
 
     _hilbert: SpinOrbitalFermions = struct.field(pytree_node=False)
     _operator_data: PyTree
@@ -220,11 +221,9 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
         )
         return cls(hilbert, operator_data)
 
-
     @classmethod
     def _from_sparse_arrays(cls, hilbert, operators_sector):
-        """
-        """
+        """ """
         # TODO come up with some interface to specify the sectors
         # then convert it to normal order here
         # alternatively expose _from_sites_sectors_daggers_weights
@@ -249,7 +248,9 @@ class ParticleNumberConservingFermioperator2ndSpinJax(DiscreteJaxOperator):
         return cls._from_coords_data(hilbert, coords_data_sectors)
 
     @classmethod
-    def _from_sparse_arrays_normal_order_all_sectors(cls, hilbert, operators, cutoff=1e-11):
+    def _from_sparse_arrays_normal_order_all_sectors(
+        cls, hilbert, operators, cutoff=1e-11
+    ):
         """
         Construct the operator from  sparse arrays for w, w_ij and w_ijkl summing over all possible values of σ,ρ,
 

@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 import sparse
 
+
 class FermiHubbardJax(ParticleNumberConservingFermioperator2ndSpinJax, struct.Pytree):
     r"""
     Fermi-Hubbard Hamiltonian
@@ -48,28 +49,34 @@ class FermiHubbardJax(ParticleNumberConservingFermioperator2ndSpinJax, struct.Py
         if isinstance(U, Sequence):
             assert len(U) == graph.n_nodes
         assert hilbert.n_spin_subsectors == 2
-        assert hilbert.size == 2*graph.n_nodes
-
+        assert hilbert.size == 2 * graph.n_nodes
 
         t = jnp.asarray(t, dtype=dtype)
         U = jnp.asarray(U, dtype=dtype)
 
         ij = np.array(graph.edges()).T
         t = np.broadcast_to(t, graph.n_edges)
-        t_mat = sparse.COO(ij, t, shape=(graph.n_nodes,)*2)
+        t_mat = sparse.COO(ij, t, shape=(graph.n_nodes,) * 2)
 
         U = np.broadcast_to(U, graph.n_nodes)
-        iiii = np.array([np.array(graph.nodes()),]*4)
-        U_mat = sparse.COO(iiii, U, shape=(graph.n_nodes,)*4)
+        iiii = np.array(
+            [
+                np.array(graph.nodes()),
+            ]
+            * 4
+        )
+        U_mat = sparse.COO(iiii, U, shape=(graph.n_nodes,) * 4)
 
         operators_sector = {}
-        operators_sector[2, (0,1)] = -(t_mat + t_mat.T)
-        operators_sector[4, ((1,0),)] = U_mat
+        operators_sector[2, (0, 1)] = -(t_mat + t_mat.T)
+        operators_sector[4, ((1, 0),)] = U_mat
 
-        op = ParticleNumberConservingFermioperator2ndSpinJax._from_sparse_arrays_normal_order(hilbert, operators_sector)
+        op = ParticleNumberConservingFermioperator2ndSpinJax._from_sparse_arrays_normal_order(
+            hilbert, operators_sector
+        )
         # TODO less hacky
-        object.__setattr__(self,'_operator_data', op._operator_data)
-        object.__setattr__(self,'_hilbert', op._hilbert)
+        object.__setattr__(self, "_operator_data", op._operator_data)
+        object.__setattr__(self, "_hilbert", op._hilbert)
 
     @property
     def is_hermitian(self):

@@ -1,4 +1,3 @@
-
 import numpy as np
 
 import jax
@@ -22,7 +21,9 @@ def compute_pyscf_integrals(mol, mo_coeff):
 
 
 def spinorb_from_spatial_sparse_coo2(tij_sparse, interleave=False, spin_values=[0, 1]):
-    sparse = import_optional_dependency("sparse", descr="spinorb_from_spatial_sparse_coo2")
+    sparse = import_optional_dependency(
+        "sparse", descr="spinorb_from_spatial_sparse_coo2"
+    )
 
     # Σ_ijσ t_ij c†_iσ c_jσ
     # for σ ∈ spin_values
@@ -65,7 +66,9 @@ def spinorb_from_spatial_sparse_coo2(tij_sparse, interleave=False, spin_values=[
 def spinorb_from_spatial_sparse_coo4(
     vijkl_sparse, interleave=False, _order_preserving=False
 ):
-    sparse = import_optional_dependency("sparse", descr="spinorb_from_spatial_sparse_coo4")
+    sparse = import_optional_dependency(
+        "sparse", descr="spinorb_from_spatial_sparse_coo4"
+    )
 
     # Σ_ijklμσ v_ijkl c†_iμ c†_jσ c_kμ c_lσ
     # interleave=True -> 2i+spin
@@ -111,10 +114,10 @@ def to_desc_order_sparse(vijkl_sparse, cutoff, set_zero_same=True):
     # now swap the larger one to the left, will cause lots of them to cancel
 
     n = vijkl_sparse.ndim
-    assert n%2 == 0
+    assert n % 2 == 0
     if n > 2:
-        ij = vijkl_sparse.coords[:n//2]
-        kl = vijkl_sparse.coords[n//2:]
+        ij = vijkl_sparse.coords[: n // 2]
+        kl = vijkl_sparse.coords[n // 2 :]
         a = vijkl_sparse.data.copy()
 
         perm_ij = np.argsort(-ij, axis=0)
@@ -123,16 +126,16 @@ def to_desc_order_sparse(vijkl_sparse, cutoff, set_zero_same=True):
         ij_desc = ij[perm_ij, np.arange(ij.shape[1])]
         kl_desc = kl[perm_kl, np.arange(kl.shape[1])]
 
-        a *= 1-2*(parity(perm_ij.T) ^ parity(perm_kl.T))
+        a *= 1 - 2 * (parity(perm_ij.T) ^ parity(perm_kl.T))
         if set_zero_same:
             # set to zero / remove all those where we try to create / destroy two on the same orbital
-            mask = (np.diff(ij_desc, axis=0) == 0).any(axis=0) | (np.diff(kl_desc, axis=0) == 0).any(axis=0)
+            mask = (np.diff(ij_desc, axis=0) == 0).any(axis=0) | (
+                np.diff(kl_desc, axis=0) == 0
+            ).any(axis=0)
             a = a[~mask]
             ij_desc = ij_desc[:, ~mask]
             kl_desc = kl_desc[:, ~mask]
-        new_coords = np.array(
-            [*ij_desc, *kl_desc]
-        )
+        new_coords = np.array([*ij_desc, *kl_desc])
         # use coo to merge same indices
         vijkl_sparse = sparse.COO(new_coords, a, shape=vijkl_sparse.shape)
         # we might have some new almost zeros from the cancellations, make sure they are 0
@@ -177,6 +180,7 @@ def arrays_to_terms(
     terms = ij.tolist() + ijkl.tolist()
     weights = tij_sparse.data.tolist() + vijkl_sparse.data.tolist()
     return terms, weights, const
+
 
 def TV_from_pyscf_molecule(
     molecule,  # type: pyscf.gto.mole.Mole  # noqa: F821

@@ -313,7 +313,6 @@ def prepare_operator_data_from_coords_data_dict_spin(coords_data_sectors, n_orbi
     return operator_data
 
 
-
 def sites_daggers_weights_to_sparse(sites, daggers, weights, n_orbitals):
     n = daggers.shape[-1]
     assert n % 2 == 0
@@ -333,8 +332,8 @@ def _insert_append_helper(d, k, s, o, cutoff):
         )
         if (
             same_number_of_sectors
-            and k == k2 # same_number_of_fermionic_operators
-            and sparse.abs(o - o2).max() < cutoff # same_matrix
+            and k == k2  # same_number_of_fermionic_operators
+            and sparse.abs(o - o2).max() < cutoff  # same_matrix
         ):
             d[k, s2 + s] = d.pop((k2, s2))
             break

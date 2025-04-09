@@ -23,6 +23,7 @@ from netket.operator import FermionOperator2nd
 
 from ._pyscf_utils import arrays_to_terms, TV_from_pyscf_molecule
 
+
 def operator_from_arrays(
     const,
     tij_sparse,
