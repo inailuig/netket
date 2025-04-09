@@ -105,7 +105,6 @@ def test_pnc_spin(N, n, s):
 def test_fermihubbard():
     t = 1.23
     U = 3.14
-    dtype = float
     g = nk.graph.Hypercube(3,2)
     hi = nk.hilbert.SpinOrbitalFermions(n_orbitals=g.n_nodes, s=1/2, n_fermions_per_spin=(2,2))
 

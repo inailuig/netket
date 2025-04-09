@@ -15,15 +15,13 @@
 
 import numpy as np
 
-import jax
-import jax.numpy as jnp
 
 from netket.operator import DiscreteOperator
 from netket.hilbert import SpinOrbitalFermions
 from netket.utils.optional_deps import import_optional_dependency
 from netket.operator import FermionOperator2nd
 
-from ._pyscf_utils import *
+from ._pyscf_utils import arrays_to_terms, TV_from_pyscf_molecule
 
 def operator_from_arrays(
     const,

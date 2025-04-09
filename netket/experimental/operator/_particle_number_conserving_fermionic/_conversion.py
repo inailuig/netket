@@ -1,11 +1,8 @@
 # utilities to convert from / to FermionOperator2nd/FermionOperator2ndJax
 
-from functools import partial
 
 import numpy as np
-import sparse
 
-import jax
 import jax.numpy as jnp
 
 from netket.jax import COOTensor
