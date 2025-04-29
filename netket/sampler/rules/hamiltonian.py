@@ -21,8 +21,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from numba import jit
-from numba4jax import njit4jax
-
+#from numba4jax import njit4jax
+njit4jax = lambda *args: None
 from netket.operator import DiscreteOperator, DiscreteJaxOperator
 from netket.utils import struct
 from netket.jax.sharding import sharding_decorator, with_samples_sharding_constraint
