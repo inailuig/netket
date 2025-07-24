@@ -30,10 +30,7 @@ def random_state(hilb: TensorHilbert, key, batches: int, *, dtype):
     )
     if isinstance(batches, int):
         batches = (batches,)
-    structure = jax.tree.map(
-        lambda x: jax.ShapeDtypeStruct(x.shape[len(batches) :], x.dtype), vs
-    )
-    return SampleWrapperExample(vs, structure)
+    return SampleWrapperExample(len(batches), vs)
 
 
 def _make_subfun(hilb, i, sub_hi):
