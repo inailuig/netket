@@ -38,6 +38,7 @@ import jax
 import jax.numpy as jnp
 from jax.core import ShapedArray
 from jax.interpreters.ad import UndefinedPrimal
+from jax.tree_util import Partial
 
 from . import utils
 
@@ -225,7 +226,7 @@ def empirical_ntk_by_jacobian(
 
         return jax.tree.reduce(operator.add, jax.tree.map(contract, j1, j2))
 
-    def ntk_fn(
+    def ntk_fn(f,
         x1: PyTree, x2: PyTree | None, params: PyTree, **apply_fn_kwargs
     ) -> jnp.ndarray:
         """Computes a single sample of the empirical NTK (jacobian outer product).
@@ -276,7 +277,7 @@ def empirical_ntk_by_jacobian(
         ntk = jax.tree.map(sum_and_contract, fx1, j1, j2)
         return ntk
 
-    return ntk_fn
+    return Partial(ntk_fn, f)
 
 
 ## utils

@@ -2,6 +2,8 @@ from typing import Any
 from collections.abc import Callable
 from warnings import warn
 
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 from jax.flatten_util import ravel_pytree
@@ -237,6 +239,8 @@ class VMC_SR(AbstractVariationalDriver):
     # Serialized state
     _old_updates: PyTree = None
     info: Any | None = None
+    _bs: int = struct.field(serialize=False)
+
     """
     PyTree to pass on information from the solver,e.g, the quadratic model.
     """
@@ -258,6 +262,7 @@ class VMC_SR(AbstractVariationalDriver):
         mode: JacobianMode | None = None,
         use_ntk: bool | None = None,
         on_the_fly: bool | None = None,
+        _bs : int | None = None,
     ):
         r"""
         Initialize the driver with the given arguments.
@@ -405,6 +410,7 @@ class VMC_SR(AbstractVariationalDriver):
                 "SRt only supports neural networks with all real or all complex parameters. "
                 "Hybrid structures are not yet supported (but we would welcome contributions. Get in touch with us!)"
             )
+        self._bs = _bs
 
     @timing.timed
     def compute_loss_and_update(self):
@@ -440,7 +446,7 @@ class VMC_SR(AbstractVariationalDriver):
 
         if self.use_ntk:
             if self.on_the_fly:
-                compute_sr_update_fun = srt_onthefly
+                compute_sr_update_fun = partial(srt_onthefly, _bs=self._bs)
             else:
                 compute_sr_update_fun = srt
         else:
